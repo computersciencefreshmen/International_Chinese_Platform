@@ -1,11 +1,11 @@
 <script setup>
-import testDemo from './components/test-demo.vue'
+import testDemo from './components/testDemo.vue'
 </script>
 
 <template>
   <div>
     我是app
-    <test-demo src="api/ap"></test-demo>
+    <testDemo src="api/ap"></testDemo>
     <el-button>hhhh</el-button>
   </div>
 </template>
