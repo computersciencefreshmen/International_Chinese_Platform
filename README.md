@@ -1,35 +1,37 @@
-# my-demo
+# vue3项目初始化
 
-This template should help get you started developing with Vue 3 in Vite.
+#### 介绍
+vue3项目初始化
 
-## Recommended IDE Setup
+#### 软件架构
+软件架构说明
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
 
-## Customize configuration
+#### 安装教程
 
-See [Vite Configuration Reference](https://vite.dev/config/).
+1.  xxxx
+2.  xxxx
+3.  xxxx
 
-## Project Setup
+#### 使用说明
 
-```sh
-pnpm install
-```
+1.  xxxx
+2.  xxxx
+3.  xxxx
 
-### Compile and Hot-Reload for Development
+#### 参与贡献
 
-```sh
-pnpm dev
-```
+1.  Fork 本仓库
+2.  新建 Feat_xxx 分支
+3.  提交代码
+4.  新建 Pull Request
 
-### Compile and Minify for Production
 
-```sh
-pnpm build
-```
+#### 特技
 
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-pnpm lint
-```
+1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
+2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
+3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
+4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
+5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
+6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
