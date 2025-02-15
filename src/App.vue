@@ -6,8 +6,10 @@ import testDemo from './components/testDemo.vue'
   <div>
     我是app
     <testDemo />
-    <el-button>hhhh</el-button>
+    <el-button>hhhh</el-button> <el-button>hhhh</el-button>
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+@import 'tailwindcss';
+</style>
