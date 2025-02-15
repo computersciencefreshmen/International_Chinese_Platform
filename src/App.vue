@@ -5,7 +5,7 @@ import testDemo from './components/testDemo.vue'
 <template>
   <div>
     我是app
-    <testDemo src="api/ap"></testDemo>
+    <testDemo />
     <el-button>hhhh</el-button>
   </div>
 </template>
