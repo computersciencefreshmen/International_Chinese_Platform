@@ -1,0 +1,10 @@
+{
+    "welcome": "欢迎",
+    "message": {
+      "hello": "你好，{name}！"
+    },
+    "button": {
+      "submit": "提交",
+      "cancel": "取消"
+    }
+  }
