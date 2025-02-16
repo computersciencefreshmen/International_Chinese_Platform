@@ -1,6 +1,5 @@
 <template>
-  <router-view></router-view>
-  <div>1111</div>
+  <div>我是登录页</div>
 </template>
 <script setup></script>
 <style scoped></style>
