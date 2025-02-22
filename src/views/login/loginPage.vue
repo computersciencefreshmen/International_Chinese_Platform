@@ -7,6 +7,7 @@ import MySearchBox from '@/components/basic/MySearchBox.vue' //引入自定义�
 import optionsCp from './components/optionsCp.vue' //引入自定义选项组件
 import InputComponent from '@/components/basic/InputComponent.vue' //引入自定义输入框组件
 import registerComponent from './components/registerComponent.vue' //引入自定义注册组件
+import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
 const localeStore = useLocaleStore() //获取语言存储
 const { locale } = useI18n() //获取当前语言
 
@@ -85,14 +86,7 @@ const handleLogin = () => {
     <header
       class="flex flex-row justify-between bg-primary bg-primary1 px-4 py-2"
     >
-      <div class="flex flex-row items-center basic-1/4">
-        <img class="w-8 sm:w-14" src="@/assets/icon/logo.png" alt="logo" />
-        <img
-          class="h-8 sm:h-14 mt-2"
-          src="@/assets/icon/文字logo.png"
-          alt="文字logo"
-        />
-      </div>
+      <logoComponent></logoComponent>
       <div class="flex flex-row items-center md:basis-6/12">
         <div>
           <select
@@ -220,12 +214,7 @@ const handleLogin = () => {
           </div>
         </div>
         <!-- 注册主体填写 -->
-        <div
-          v-else
-          class="bg-primary rounded-2xl w-2/3 py-4 flex items-center justify-center"
-        >
-          <registerComponent></registerComponent>
-        </div>
+        <registerComponent v-else></registerComponent>
       </transition>
     </main>
   </div>
