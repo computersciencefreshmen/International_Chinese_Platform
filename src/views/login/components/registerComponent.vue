@@ -204,7 +204,7 @@ const handleStudentInfo = () => {
 </script>
 <template>
   <div
-    class="bg-primary rounded-2xl py-4 flex items-center justify-center w-2/3 overflow-hidden"
+    class="bg-primary rounded-2xl py-4 flex items-center justify-center w-2/3 overflow-hidden transition-all ease-in-out duration-500"
   >
     <transition name="slide" mode="out-in">
       <div
