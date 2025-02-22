@@ -15,8 +15,8 @@ const handleActive = (event) => {
 <template>
   <div
     @click="handleActive"
-    :class="{ 'bg-blue-400': props.isActive }"
     class="flex items-center justify-between px-3 cursor-pointer h-16 mx-2 rounded-lg hover:bg-blue-400 bg-secondary transition-all duration-300 ease-in-out"
+    :class="{ '!bg-blue-400': props.isActive }"
   >
     <slot></slot>
     <text class="font-semibold text-l ml-2"> {{ props.text }}</text>

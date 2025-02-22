@@ -6,7 +6,7 @@ import MyButton from '@/components/basic/MyButton.vue' //引入自定义按钮�
 import MySearchBox from '@/components/basic/MySearchBox.vue' //引入自定义搜索框组件
 import optionsCp from './components/optionsCp.vue' //引入自定义选项组件
 import InputComponent from '@/components/basic/InputComponent.vue' //引入自定义输入框组件
-
+import registerComponent from './components/registerComponent.vue' //引入自定义注册组件
 const localeStore = useLocaleStore() //获取语言存储
 const { locale } = useI18n() //获取当前语言
 
@@ -43,10 +43,7 @@ const isActive = ref(null)
 
 //处理选择身份的点击事件
 const handleIsActive = (event) => {
-  console.log(event)
-
   isActive.value = event.target.innerText || event.target.alt
-  console.log(isActive.value)
 }
 
 // 收集登录输入框信息
@@ -127,103 +124,106 @@ const handleLogin = () => {
     </header>
     <!-- 主体内容填写 -->
     <main class="flex-1 flex justify-center items-center">
-      <div class="bg-primary rounded-2xl min-w-min p-4">
-        <!-- 登录主体内容填写 -->
-        <div v-if="isLogin" class="px-6">
-          <div class="ml-6 mb-2 mt-6">
-            <p class="tracking-wide text-black text-3xl font-semibold">
-              欢迎登陆
-            </p>
-            <p class="tracking-wide text-black text-3xl font-semibold mt-2">
-              国际中文教育平台
-            </p>
+      <!-- 登录主体内容填写 -->
+      <div v-if="isLogin" class="px-6 bg-primary rounded-2xl min-w-min py-4">
+        <div class="ml-6 mb-2 mt-6">
+          <p class="tracking-wide text-black text-3xl font-semibold">
+            欢迎登陆
+          </p>
+          <p class="tracking-wide text-black text-3xl font-semibold mt-2">
+            国际中文教育平台
+          </p>
+        </div>
+        <div class="flex flex-col items-center justify-center">
+          <div class="flex items-center mt-4 w-full">
+            <optionsCp
+              text="我是学生"
+              :isActive="isActive === '我是学生'"
+              @click="handleIsActive"
+            >
+              <img
+                class="w-10 h-10"
+                src="@/assets/icon/student.png"
+                alt="我是学生"
+              />
+            </optionsCp>
+            <optionsCp
+              text="我是老师"
+              @click="handleIsActive"
+              :isActive="isActive === '我是老师'"
+            >
+              <img
+                class="w-12 h-12"
+                src="@/assets/icon/teacher.png"
+                alt="我是老师"
+              />
+            </optionsCp>
+            <optionsCp
+              text="我是管理员"
+              @click="handleIsActive"
+              :isActive="isActive === '我是管理员'"
+            >
+              <img
+                class="w-10 h-10"
+                src="@/assets/icon/admin.png"
+                alt="我是管理员"
+              />
+            </optionsCp>
           </div>
-          <div class="flex flex-col items-center justify-center">
-            <div class="flex items-center mt-4 w-full">
-              <optionsCp
-                text="我是学生"
-                :isActive="isActive === '我是学生'"
-                @click="handleIsActive"
-              >
-                <img
-                  class="w-10 h-10"
-                  src="@/assets/icon/student.png"
-                  alt="我是学生"
-                />
-              </optionsCp>
-              <optionsCp
-                text="我是老师"
-                @click="handleIsActive"
-                :isActive="isActive === '我是老师'"
-              >
-                <img
-                  class="w-12 h-12"
-                  src="@/assets/icon/teacher.png"
-                  alt="我是老师"
-                />
-              </optionsCp>
-              <optionsCp
-                text="我是管理员"
-                @click="handleIsActive"
-                :isActive="isActive === '我是管理员'"
-              >
-                <img
-                  class="w-10 h-10"
-                  src="@/assets/icon/admin.png"
-                  alt="我是管理员"
-                />
-              </optionsCp>
-            </div>
-            <div class="w-11/12 rounded-md mt-4 flex flex-col items-center">
-              <form @submit.prevent="handleLogin" class="w-full">
-                <!-- 账号输入框 -->
-                <InputComponent
-                  v-model="formData.email"
-                  placeholder="请输入邮箱"
-                  id="email"
-                  label="邮箱:"
-                  :error="errors.email"
-                />
+          <div class="w-11/12 rounded-md mt-4 flex flex-col items-center">
+            <form @submit.prevent="handleLogin" class="w-full">
+              <!-- 账号输入框 -->
+              <InputComponent
+                v-model="formData.email"
+                placeholder="请输入邮箱"
+                id="email"
+                label="邮箱"
+                :error="errors.email"
+              />
 
-                <!-- 密码输入框 -->
-                <InputComponent
-                  type="password"
-                  placeholder="请输入密码"
-                  label="密码:"
-                  v-model="formData.password"
-                  :error="errors.password"
-                  id="password"
-                />
-              </form>
-              <!-- 忘记密码 -->
-              <a href="#" class="text-black text-sm">忘记密码？</a>
-              <!-- 我已同意 -->
-              <div class="flex items-center mt-2">
-                <input type="checkbox" class="mr-2" />
-                <p class="text-sm">我已阅读并同意</p>
-                <a href="#" class="text-blue-500 text-sm">《用户服务协议》</a>
-                <p class="text-sm">和</p>
-                <a href="#" class="text-blue-500 text-sm">《隐私协议》</a>
-              </div>
-              <MyButton
-                type="primary"
-                class="mt-4 w-36 py-2 text-black"
-                @click="handleLogin"
-                >登录</MyButton
-              >
-              <!-- 没有账号，点击注册 -->
-              <a
-                href="#"
-                @click="isLogin = false"
-                class="text-black text-sm mt-4 underline"
-                >没有账号？点击注册</a
-              >
-              <p class="text-sm font-thin mt-4">GCEP V1.0</p>
+              <!-- 密码输入框 -->
+              <InputComponent
+                type="password"
+                placeholder="请输入密码"
+                label="密码"
+                v-model="formData.password"
+                :error="errors.password"
+                id="password"
+              />
+            </form>
+            <!-- 忘记密码 -->
+            <a href="#" class="text-black text-sm">忘记密码？</a>
+            <!-- 我已同意 -->
+            <div class="flex items-center mt-2">
+              <input type="checkbox" class="mr-2" />
+              <p class="text-sm">我已阅读并同意</p>
+              <a href="#" class="text-blue-500 text-sm">《用户服务协议》</a>
+              <p class="text-sm">和</p>
+              <a href="#" class="text-blue-500 text-sm">《隐私协议》</a>
             </div>
+            <MyButton
+              type="primary"
+              class="mt-4 w-36 py-2 text-black"
+              @click="handleLogin"
+              >登录</MyButton
+            >
+            <!-- 没有账号，点击注册 -->
+            <a
+              href="#"
+              @click="isLogin = false"
+              class="text-black text-sm mt-4 underline"
+              >没有账号？点击注册</a
+            >
+            <p class="text-sm font-thin mt-4">GCEP V1.0</p>
           </div>
         </div>
-        <!-- 注册主体填写 -->
-        <div v-else></div>
+      </div>
+      <!-- 注册主体填写 -->
+      <div
+        v-else
+        class="bg-primary rounded-2xl w-2/3 py-4 flex items-center justify-center"
+      >
+        <registerComponent></registerComponent>
       </div>
     </main>
   </div>
