@@ -5,7 +5,7 @@ import MyButton from '@/components/basic/MyButton.vue' //引入自定义按钮�
 import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
 import { ref } from 'vue'
 
-const isRegisterActive = ref('我是学生') //是学生还是老师注册
+const isRegisterActive = ref(null) //是学生还是老师注册
 
 //是否同意用户协议
 const isAgreeList = ref(false)
@@ -104,39 +104,35 @@ const handleRegister = () => {
     return
   }
 
-  //如果是学生注册，则执行学生注册逻辑
-  if (isRegisterActive.value === '我是学生') {
-    //执行学生注册逻辑
-    step.value.initial = false // 隐藏注册初始化页面
-    step.value.stepStudent.stepOne = true // 显示学生注册第一步
-  } else if (isRegisterActive.value === '我是老师') {
-    //执行老师注册逻辑
-    step.value.initial = false // 隐藏注册初始化页面
-    step.value.stepTeacher.stepOne = true // 显示老师注册第一步
-  } else {
+  //
+  if (!isRegisterActive.value) {
     //提示用户选择注册身份
     alert('请选择注册身份')
+    return
   }
+
+  //执行注册逻辑
+
+  //获取个人信息
+  step.value.initial = false //隐藏注册的初始化界面
+  step.value.memberInfo = true //显示个人信息获取界面
 }
 
 //给步骤添加状态
 const step = ref({
   initial: true, //初始状态
+  // 共同步骤，个人信息获取
+  memberInfo: false,
   //学生注册步骤
-  stepStudent: {
-    stepOne: false,
-    stepTwo: false,
-    stepThree: false
-  },
+  stepStudent: false,
   //老师注册步骤
-  stepTeacher: {
-    stepOne: false,
-    stepTwo: false
-  }
+  stepTeacher: false,
+  // 共同步骤，进入平台
+  enterPlatform: false
 })
 
-// 收集学生个人信息
-const studentInfo = ref({
+// 收集个人信息
+const getMemberInfo = ref({
   name: '',
   //国籍
   nationality: '',
@@ -146,8 +142,8 @@ const studentInfo = ref({
   age: ''
 })
 
-// 学生信息校验错误信息
-const studentError = ref({
+// 个人信息校验错误信息
+const MemberError = ref({
   name: '',
   //国籍
   nationality: '',
@@ -158,32 +154,32 @@ const studentError = ref({
 })
 
 // 检验学生信息
-const verifyStudentInfo = () => {
+const verifyMemberInfo = () => {
   // 校验姓名
-  if (!studentInfo.value.name) {
-    studentError.value.name = '姓名不能为空'
+  if (!getMemberInfo.value.name) {
+    MemberError.value.name = '姓名不能为空'
     return false
   }
 
   // 校验国籍
-  if (!studentInfo.value) {
-    studentError.value.national = '国籍不能为空'
+  if (!getMemberInfo.value.nationality) {
+    MemberError.value.national = '国籍不能为空'
     return false
   }
 
   // 校验地区
-  if (!studentInfo.value.region) {
-    studentError.value.region = '地区不能为空'
+  if (!getMemberInfo.value.region) {
+    MemberError.value.region = '地区不能为空'
     return false
   }
 
   // 校验年龄不能为空且只能为大于0的数字
   if (
-    !studentInfo.value.age ||
-    isNaN(studentInfo.value.age) ||
-    studentInfo.value.age <= 0
+    !getMemberInfo.value.age ||
+    isNaN(getMemberInfo.value.age) ||
+    getMemberInfo.value.age <= 0
   ) {
-    studentError.value.age = '年龄不能为空且只能为大于0的数字'
+    MemberError.value.age = '年龄不能为空且只能为大于0的数字'
     return false
   }
 
@@ -191,22 +187,137 @@ const verifyStudentInfo = () => {
 }
 
 // 处理学生信息
-const handleStudentInfo = () => {
+const handleMemberInfo = () => {
   //校验学生信息
-  if (!verifyStudentInfo()) {
+  if (!verifyMemberInfo()) {
     return
   }
 
+  step.value.memberInfo = false // 隐藏个人信息获取界面
+
   //执行学生信息逻辑
-  step.value.stepStudent.stepOne = false // 隐藏学生注册第一步
-  step.value.stepStudent.stepTwo = true // 显示学生注册第二步
+  if (isRegisterActive.value === '我是学生') {
+    step.value.stepStudent = true // 显示学生注册
+  } else if (isRegisterActive.value === '我是老师') {
+    step.value.stepTeacher = true // 显示老师注册
+  }
+}
+
+//学生汉语水平高亮序号
+const isActiveStudentLevel = ref(null)
+
+//学生汉语水平列表
+const studentChineseLevel = ref([
+  {
+    id: 1,
+    level: 'HSK1',
+    description: '掌握150个汉字'
+  },
+  {
+    id: 2,
+    level: 'HSK2',
+    description: '掌握300个汉字'
+  },
+  {
+    id: 3,
+    level: 'HSK3',
+    description: '掌握600个汉字'
+  },
+  {
+    id: 4,
+    level: 'HSK4',
+    description: '掌握1200个汉字'
+  },
+  {
+    id: 5,
+    level: 'HSK5',
+    description: '掌握2500个汉字'
+  },
+  {
+    id: 6,
+    level: 'HSK6',
+    description: '掌握5000个汉字'
+  }
+])
+
+//处理学生汉语水平
+const handleStudentChineseLevel = () => {
+  //校验学生汉语水平
+  if (isActiveStudentLevel.value === null) {
+    alert('请选择你现在的汉语水平')
+    return
+  }
+
+  //执行学生汉语水平逻辑
+  step.value.stepStudent = false // 隐藏学生注册
+  step.value.enterPlatform = true // 显示进入平台
+}
+
+//教师证书列表
+const teacherCertificate = ref([
+  {
+    id: 1,
+    name: '国际中文教师证书',
+    // 是否有等级
+    isAgree: false
+  },
+  {
+    id: 2,
+    name: '对外汉语教师资格证',
+    isAgree: true,
+    isShowAgree: false,
+    //等级
+    levels: ['初级', '中级', '高级'],
+    isSelectedAgree: false
+  },
+  {
+    id: 3,
+    name: '汉语作为外语教学能力证书',
+    isAgree: true,
+    isShowAgree: false,
+    //等级
+    levels: ['初级', '中级', '高级'],
+    isSelectedAgree: false
+  },
+  {
+    id: 4,
+    name: '普通话水平测试证书',
+    isAgree: true,
+    isShowAgree: false,
+    //等级
+    levels: ['一级甲等', '一级乙等', '二级甲等', '二级乙等'],
+
+    //等级高亮
+    isActiveAgree: null,
+
+    //是否确认选中等级
+    isSelectedAgree: false
+  }
+])
+
+//处理教师注册时的证书
+const handleTeacherCertificate = () => {
+  //校验教师注册时的证书
+  // for (let item of teacherCertificate.value) {
+  //   if (item.isAgree) {
+  //     if (item.isActiveAgree === null) {
+  //       alert('请选择你拥有的汉语教学资格证书')
+  //       return
+  //     }
+  //   }
+  // }
+
+  //执行教师注册时的证书逻辑
+  step.value.stepTeacher = false // 隐藏教师注册
+  step.value.enterPlatform = true // 显示进入平台
 }
 </script>
 <template>
   <div
-    class="bg-primary rounded-2xl py-4 flex items-center justify-center w-2/3 overflow-hidden transition-all ease-in-out duration-500"
+    class="bg-primary rounded-2xl py-2 flex items-center justify-center w-2/3 overflow-hidden transition-all ease-in-out duration-500"
   >
     <transition name="slide" mode="out-in">
+      <!-- 注册的初始化界面。-->
       <div
         v-if="step.initial"
         key="initial"
@@ -298,57 +409,180 @@ const handleStudentInfo = () => {
           <p class="text-sm font-thin mt-4">GCEP V1.0</p>
         </div>
       </div>
-      <div
-        v-else-if="isRegisterActive === '我是学生' && step.stepStudent.stepOne"
-        key="step-student-one"
-      >
+      <!-- 个人信息填写界面  -->
+      <div v-else-if="step.memberInfo" key="memberInfo">
         <logoComponent class="scale-75 -ml-28"></logoComponent>
         <p class="font-semibold text-xl">
           欢迎大宝贝<br />为了更好的进行中文学习，现在需要您完善个人信息
         </p>
         <div class="flex flex-col items-center justify-center pt-8">
           <InputComponent
-            v-model="studentInfo.name"
+            v-model="getMemberInfo.name"
             placeholder="请输入姓名"
             id="name"
             label="姓名"
-            :error="studentError.name"
+            :error="MemberError.name"
           />
           <InputComponent
-            v-model="studentInfo.nationality"
+            v-model="getMemberInfo.nationality"
             placeholder="请输入国籍"
             id="nationality"
             label="国籍"
-            :error="studentError.national"
+            :error="MemberError.national"
           />
           <InputComponent
-            v-model="studentInfo.region"
+            v-model="getMemberInfo.region"
             placeholder="请输入地区"
             id="region"
             label="地区"
-            :error="studentError.region"
+            :error="MemberError.region"
           />
           <InputComponent
-            v-model="studentInfo.age"
+            v-model="getMemberInfo.age"
             placeholder="请输入年龄"
             id="age"
             label="年龄"
-            :error="studentError.age"
+            :error="MemberError.age"
           />
           <MyButton
             type="primary"
             class="mt-2 w-36 py-2 text-black"
-            @click="handleStudentInfo"
+            @click="handleMemberInfo"
             >下一步</MyButton
           >
           <p class="text-sm font-thin mt-2">GCEP V1.0</p>
         </div>
       </div>
+      <!-- 学生注册页面 -->
       <div
-        v-else-if="isRegisterActive === '我是老师' && step.stepTeacher.stepOne"
-        key="step-teacher-one"
+        v-else-if="isRegisterActive === '我是学生' && step.stepStudent"
+        key="step-student"
       >
-        2
+        <logoComponent class="scale-75 -ml-28"></logoComponent>
+        <p class="font-semibold text-xl mb-4">请选择你现在的汉语水平</p>
+        <div class="grid grid-cols-3 gap-6">
+          <div
+            class="flex flex-col justify-center items-center rounded-lg bg-white hover:bg-red-400 p-4 cursor-pointer"
+            v-for="(item, index) in studentChineseLevel"
+            :key="item.id"
+            @click="isActiveStudentLevel = index"
+            :class="{
+              'bg-red-400': isActiveStudentLevel === index
+            }"
+          >
+            <img
+              class="w-16"
+              src="@/assets/icon/agree.png"
+              alt="汉语等级图标"
+            />
+            <p class="text-blue-500 text-sm">
+              {{ item.description }}
+            </p>
+            <p class="font-semibold">{{ item.level }}</p>
+          </div>
+        </div>
+        <div class="flex flex-col items-center justify-center mt-4">
+          <span
+            @click="isActiveStudentLevel = 6"
+            class="rounded-full bg-blue-100 hover:bg-blue-300 cursor-pointer py-2 px-4"
+            :class="{ '!bg-blue-300': isActiveStudentLevel === 6 }"
+          >
+            我是初学者，对汉语基本没有了解
+          </span>
+          <MyButton
+            type="primary"
+            class="mt-2 w-36 py-2 text-black"
+            @click="handleStudentChineseLevel"
+            >下一步</MyButton
+          >
+          <p class="text-sm font-thin mt-2">GCEP V1.0</p>
+        </div>
+      </div>
+      <!-- 老师注册页面 -->
+      <div
+        v-else-if="isRegisterActive === '我是老师' && step.stepTeacher"
+        key="step-teacher"
+        class="py-4 px-6"
+      >
+        <logoComponent class="scale-75 -ml-28"></logoComponent>
+        <p class="font-semibold text-xl mb-4">请选择你拥有的汉语教学资格证书</p>
+        <div class="grid grid-cols-4 gap-8">
+          <div
+            class="flex flex-col items-center justify-center cursor-pointer overflow-hidden"
+            v-for="item in teacherCertificate"
+            :key="item.id"
+          >
+            <div
+              class="rounded-lg relative flex flex-col items-center justify-center bg-white p-4"
+              @mouseenter="
+                () => {
+                  if (item.isAgree) {
+                    item.isShowAgree = true
+                  }
+                }
+              "
+            >
+              <img src="@/assets/icon/证书.png" alt="老师证书图片" />
+              <p class="my-2 text-sm">
+                {{ item.name }}
+              </p>
+              <div
+                v-if="item.isShowAgree"
+                class="flex flex-col items-center justify-center bg-blue-500 opacity-75 rounded-lg p-4 absolute inset-0 m-4"
+              >
+                <div
+                  v-for="(level, index) in item.levels"
+                  :key="index"
+                  class="bg-gray-800 text-white px-4 rounded-full my-2 transition-colors duration-200 ease-linear cursor-pointer"
+                  :class="{ 'bg-red-500': item.isActiveAgree === index }"
+                  @click="
+                    item.isActiveAgree === index
+                      ? (item.isActiveAgree = null)
+                      : (item.isActiveAgree = index)
+                  "
+                >
+                  {{ level }}
+                </div>
+              </div>
+            </div>
+            <label
+              class="mt-4 w-full text-center inline-block bg-white text-black px-4 py-2 rounded-lg hover:bg-blue-300 transition-colors duration-200 ease-linear cursor-pointer"
+            >
+              上传证明材料
+              <input type="file" class="hidden" />
+            </label>
+          </div>
+        </div>
+        <div class="flex flex-col items-center justify-center mt-4">
+          <MyButton
+            type="primary"
+            class="mt-2 w-36 py-2 text-black"
+            @click="handleTeacherCertificate"
+            >下一步</MyButton
+          >
+          <p class="text-sm font-thin mt-2">GCEP V1.0</p>
+        </div>
+      </div>
+      <!-- 共同进入平台页面 -->
+      <div v-else-if="step.enterPlatform" key="step-enterPlatform">
+        <logoComponent class="scale-75 -ml-28"></logoComponent>
+        <div class="my-20 text-3xl text-center font-sans">
+          <p class="leading-relaxed">Kimberly，欢迎你</p>
+          <p class="leading-relaxed">海内存知己，天涯若比邻</p>
+          <p class="leading-relaxed">
+            无论您身处何地，这里都是您学习中文、探索文化的家园
+          </p>
+          <p class="leading-relaxed">让我们一起开启这段美妙的语言之旅吧!</p>
+        </div>
+        <div class="flex flex-col justify-center items-center">
+          <MyButton
+            type="primary"
+            class="mt-2 px-4 py-2 text-black"
+            @click="handleStudentEnter"
+            >进入国际中文教育平台</MyButton
+          >
+          <p class="text-sm font-thin mt-2">GCEP V1.0</p>
+        </div>
       </div>
     </transition>
   </div>
