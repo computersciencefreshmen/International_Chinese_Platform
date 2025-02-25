@@ -4,6 +4,9 @@ import InputComponent from '@/components/basic/InputComponent.vue' //引入自�
 import MyButton from '@/components/basic/MyButton.vue' //引入自定义按钮组件
 import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
 import { ref } from 'vue'
+import { useRouter } from 'vue-router' //引入路由
+
+const router = useRouter() //路由
 
 const isRegisterActive = ref(null) //是学生还是老师注册
 
@@ -311,6 +314,20 @@ const handleTeacherCertificate = () => {
   step.value.stepTeacher = false // 隐藏教师注册
   step.value.enterPlatform = true // 显示进入平台
 }
+
+// 进入平台
+const handleMemberEnter = () => {
+  //执行进入平台逻辑
+  if (isRegisterActive.value === '我是学生') {
+    //执行学生注册逻辑
+    // 跳转到学生页面
+    router.push('/student')
+  } else if (isRegisterActive.value === '我是老师') {
+    //执行老师注册逻辑
+    // 跳转到老师页面
+    router.push('/teacher')
+  }
+}
 </script>
 <template>
   <div
@@ -578,7 +595,7 @@ const handleTeacherCertificate = () => {
           <MyButton
             type="primary"
             class="mt-2 px-4 py-2 text-black"
-            @click="handleStudentEnter"
+            @click="handleMemberEnter"
             >进入国际中文教育平台</MyButton
           >
           <p class="text-sm font-thin mt-2">GCEP V1.0</p>

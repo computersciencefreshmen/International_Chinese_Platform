@@ -5,9 +5,49 @@ const router = createRouter({
   routes: [
     { path: '/', component: () => import('@/views/login/loginPage.vue') },
     {
+      // 学生端架子模块
       path: '/student',
       component: () =>
-        import('@/views/student/studentHomePage/studentHomePage.vue')
+        import('@/views/student/studentLayout/studentLayout.vue'),
+      redirect: '/student/home', // 重定向到首页
+      children: [
+        // 子路由配置
+        {
+          // 学生首页模块
+          path: 'home', // 子路由路径
+          name: 'studentHome',
+          component: () =>
+            import('@/views/student/studentHomePage/studentHomePage.vue')
+        },
+        {
+          // 学生预约老师模块
+          path: 'order',
+          name: 'orderTeacher',
+          component: () =>
+            import('@/views/student/orderTeacher/orderTeacher.vue')
+        },
+        {
+          // 学生发布预约模块
+          path: 'publish',
+          name: 'publishOrder',
+          component: () =>
+            import('@/views/student/publishOrder/publishOrder.vue')
+        },
+        {
+          // 学生网络课程模块
+          path: 'course',
+          name: 'onlineCourse',
+          component: () =>
+            import('@/views/student/onlineCourses/onlineCourses.vue')
+        },
+        {
+          // 学生个人中心模块
+          path: 'center',
+          name: 'personalCenter',
+          component: () =>
+            import('@/views/student/personalCenter/personalCenter.vue')
+        }
+      ]
     },
     {
       path: '/teacher',
