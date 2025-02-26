@@ -44,8 +44,41 @@ const router = createRouter({
           // 学生个人中心模块
           path: 'center',
           name: 'personalCenter',
+          redirect: '/student/center/info', // 重定向到个人信息模块
           component: () =>
-            import('@/views/student/personalCenter/personalCenter.vue')
+            import('@/views/student/personalCenter/personalCenter.vue'),
+
+          // 个人中心子路由
+          children: [
+            {
+              // 个人信息模块
+              path: 'info',
+              name: 'personalInfo',
+              component: () =>
+                import('@/views/student/personalCenter/personalInfo.vue')
+            },
+            {
+              // 会员信息模块
+              path: 'vip',
+              name: 'vipInfo',
+              component: () =>
+                import('@/views/student/personalCenter/vipInfo.vue')
+            },
+            {
+              // 修改密码模块
+              path: 'changePassword',
+              name: 'changePassword',
+              component: () =>
+                import('@/views/student/personalCenter/changePassword.vue')
+            },
+            {
+              // 消息通知模块
+              path: 'message',
+              name: 'message',
+              component: () =>
+                import('@/views/student/personalCenter/messageNotice.vue')
+            }
+          ]
         }
       ]
     },
