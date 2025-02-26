@@ -1,5 +1,5 @@
 <script setup>
-import { defineProps, ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import { usePersonalStore } from '@/stores'
 const personalStore = usePersonalStore() // 引入仓库
 
@@ -72,7 +72,7 @@ nextTick(() => {
       @click="((isTabActive = index), $router.push(item.path))"
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
-      class="p-4 ease-linear flex items-center justify-center cursor-pointer"
+      class="p-4 ease-linear flex items-center justify-center cursor-pointer font-sans"
     >
       <text>{{ item.name }}</text>
     </div>

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ref } from 'vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -54,6 +55,7 @@ const router = createRouter({
               // 个人信息模块
               path: 'info',
               name: 'personalInfo',
+              meta: { order: 1 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/personalInfo.vue')
             },
@@ -61,6 +63,7 @@ const router = createRouter({
               // 会员信息模块
               path: 'vip',
               name: 'vipInfo',
+              meta: { order: 2 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/vipInfo.vue')
             },
@@ -68,6 +71,7 @@ const router = createRouter({
               // 修改密码模块
               path: 'changePassword',
               name: 'changePassword',
+              meta: { order: 3 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/changePassword.vue')
             },
@@ -75,6 +79,7 @@ const router = createRouter({
               // 消息通知模块
               path: 'message',
               name: 'message',
+              meta: { order: 4 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/messageNotice.vue')
             }
@@ -111,4 +116,17 @@ const router = createRouter({
 //   }
 // });
 
+const transitionName = ref('slide-down') // 默认向下滑动
+
+router.beforeEach((to, from, next) => {
+  // 根据路由切换方向动态设置动画
+  if (to.meta.order > from.meta.order) {
+    transitionName.value = 'slide-down' // 向下滑动
+  } else {
+    transitionName.value = 'slide-up' // 向上滑动
+  }
+  next() //延迟500ms后执行路由跳转
+})
+
 export default router
+export { transitionName }
