@@ -1,5 +1,5 @@
 <script setup>
-import tabSwitch from '@/components/basic/tabSwitch.vue'
+import TabSwitch from '@/components/basic/TabSwitch.vue'
 // import { transitionName } from '@/router' // 从路由配置中导入 transitionName
 
 // 定义路由列表
@@ -23,11 +23,6 @@ const routerList = [
     id: 4,
     name: '消息通知',
     path: '/student/center/message'
-  },
-  {
-    id: 5,
-    name: '退出登录',
-    path: ''
   }
 ]
 </script>
@@ -38,18 +33,10 @@ const routerList = [
     <!-- 左边导航栏 -->
     <aside class="w-36">
       <!-- 引入tab栏组件 -->
-      <tabSwitch :tabList="routerList"></tabSwitch>
+      <TabSwitch :tabList="routerList"></TabSwitch>
     </aside>
     <!-- 右边对应路由内容 -->
     <main class="flex-1 rounded-b-lg overflow-hidden">
-      <!-- <router-view v-slot="{ Component, route }">
-        <transition :name="transitionName" mode="out-in">
-          <keep-alive>
-            <component :is="Component" :key="route.fullPath" />
-          </keep-alive>
-        </transition>
-      </router-view> -->
-
       <Transition name="slide-down" mode="out-in">
         <router-view></router-view>
       </Transition>

@@ -5,6 +5,9 @@ const personalStore = usePersonalStore() // 引入仓库
 import { useRouter } from 'vue-router'
 const router = useRouter()
 
+//引入模态框
+import CustomModal from '@/components/basic/CustomModal.vue'
+
 // 接收props的导航栏参数
 const props = defineProps({
   tabList: Array
@@ -63,6 +66,15 @@ const handleTabClick = (index, path) => {
 nextTick(() => {
   handleMouseLeave()
 })
+
+//定义模态框状态
+const showModal = ref(false)
+
+//模态框确认事件
+const handleExit = () => {
+  console.log('退出')
+  router.push('/login')
+}
 </script>
 <template>
   <nav
@@ -84,6 +96,21 @@ nextTick(() => {
     >
       <text>{{ item.name }}</text>
     </div>
+    <div
+      @click="showModal = true"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
+      class="p-4 ease-linear flex items-center justify-center cursor-pointer font-sans"
+    >
+      <text>退出登录</text>
+    </div>
   </nav>
+  <CustomModal
+    :isVisible="showModal"
+    @close="showModal = false"
+    @confirm="handleExit"
+  >
+    <template #content>确定要退出登录吗？</template>
+  </CustomModal>
 </template>
 <style scoped></style>

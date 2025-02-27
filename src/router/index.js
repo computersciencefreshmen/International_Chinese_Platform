@@ -4,7 +4,14 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', component: () => import('@/views/login/loginPage.vue') },
+    {
+      path: '/',
+      redirect: '/login'
+    },
+    {
+      path: '/login',
+      component: () => import('@/views/login/loginPage.vue')
+    },
     {
       // 学生端架子模块
       path: '/student',
