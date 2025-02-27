@@ -10,6 +10,16 @@ const props = defineProps({
   modelValue: String,
   label: String,
   error: String,
+  // 是否显示有弧度的圆角
+  roundedLg: {
+    type: Boolean,
+    default: false
+  },
+  // 是否标签显示在输入框内部
+  innerLabel: {
+    type: Boolean,
+    default: true
+  },
   id: {
     type: String,
     required: true
@@ -75,9 +85,16 @@ const startCountdown = () => {
 }
 </script>
 <template>
-  <div class="mb-6">
-    <div class="relative">
+  <div class="mb-6 flex justify-center items-center w-full">
+    <label
+      v-if="!props.innerLabel"
+      :for="props.id"
+      class="flex items-center text-gray-700 mr-6 font-sans font-thin text-lg"
+      >{{ props.label }}</label
+    >
+    <div class="relative flex-1">
       <label
+        v-if="props.innerLabel"
         :for="props.id"
         class="flex items-center text-gray-700 absolute inset-y-0 left-0 ml-6"
         >{{ props.label }}</label
@@ -88,7 +105,11 @@ const startCountdown = () => {
         :value="props.modelValue"
         @input="emit('update:modelValue', $event.target.value)"
         class="w-full rounded-full px-24 py-2 border border-gray-300 focus:outline-none focus:border-blue-500"
-        :class="{ 'border-red-500': props.error }"
+        :class="{
+          'border-red-500': props.error,
+          '!rounded-lg': roundedLg,
+          'px-6': !props.innerLabel
+        }"
         :id="props.id"
       />
 

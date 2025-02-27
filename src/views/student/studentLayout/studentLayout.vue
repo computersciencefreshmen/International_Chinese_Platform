@@ -9,8 +9,8 @@ import { usePersonalStore } from '@/stores'
 
 const personalStore = usePersonalStore()
 // 引入路由
-// import { useRouter } from 'vue-router'
-// const router = useRouter()
+import { useRouter } from 'vue-router'
+const router = useRouter()
 
 // tab切换内容设置
 const tabList = [
@@ -75,8 +75,36 @@ const moveLineToFirstTab = () => {
       const { left, width } = firstTab.getBoundingClientRect()
       placeHightLine(left, width)
     }
+    handleContainerHeight() // 添加导航栏高度
   })
 }
+
+// 鼠标点击tab栏事件
+const handleTabClick = (number1, number2, path) => {
+  activeTabIndex.value = number1
+  router.push(path)
+  personalStore.isTabActive = number2
+}
+
+//定义导航栏容器高度
+const containerHeight = ref(null)
+
+//定义导航栏
+const headerRef = ref(null)
+
+//定义占位盒子
+const fakeHeader = ref(null)
+
+//一进页面就计算导航栏的高度
+const handleContainerHeight = () => {
+  //获取导航栏的高度
+  containerHeight.value = headerRef.value.offsetHeight
+  //设置占位盒子的高度
+  fakeHeader.value.style.height = containerHeight.value + 'px'
+}
+
+//监听窗口大小变化，改变高亮线的位置
+window.addEventListener('resize', handleMouseLeave)
 
 setTimeout(() => {
   moveLineToFirstTab()
@@ -87,7 +115,9 @@ setTimeout(() => {
   <div class="flex flex-col min-h-screen bg-image">
     <!-- 头部导航栏填写 -->
     <header
+      ref="headerRef"
       class="flex flex-row bg-primary bg-primary1 px-4 py-1 relative border-b border-gray-300"
+      style="position: fixed; top: 0; left: 0; right: 0; z-index: 100"
     >
       <!-- logo -->
       <logoComponent></logoComponent>
@@ -133,13 +163,7 @@ setTimeout(() => {
             @mouseenter="handleMouseEnter"
             @mouseleave="handleMouseLeave"
             :class="{ '!border-blue-300': activeTabIndex === 4 }"
-            @click="
-              () => {
-                activeTabIndex = 4
-                $router.push('/student/center/message')
-                personalStore.isTabActive = 3
-              }
-            "
+            @click="handleTabClick(4, 3, '/student/center/message')"
           />
           <!-- 个人头像 -->
           <div
@@ -147,13 +171,7 @@ setTimeout(() => {
             ref="personalCenterRef"
             @mouseenter="handleMouseEnter"
             @mouseleave="handleMouseLeave"
-            @click="
-              () => {
-                activeTabIndex = 5
-                $router.push('/student/center')
-                personalStore.isTabActive = 0
-              }
-            "
+            @click="handleTabClick(5, 0, '/student/center/info')"
             :class="{ 'bg-blue-300': activeTabIndex === 5 }"
           >
             <img
@@ -166,6 +184,8 @@ setTimeout(() => {
         </div>
       </div>
     </header>
+    <!-- 占位盒子 -->
+    <div ref="fakeHeader"></div>
     <!-- 主体内容填写 -->
     <router-view class="flex-1"></router-view>
   </div>

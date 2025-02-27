@@ -2,6 +2,8 @@
 import { ref, nextTick, watch } from 'vue'
 import { usePersonalStore } from '@/stores'
 const personalStore = usePersonalStore() // 引入仓库
+import { useRouter } from 'vue-router'
+const router = useRouter()
 
 // 接收props的导航栏参数
 const props = defineProps({
@@ -51,6 +53,12 @@ watch(
   }
 )
 
+// 点击tab栏事件
+const handleTabClick = (index, path) => {
+  isTabActive.value = index // 更新状态
+  router.push(path) // 触发路由跳转
+}
+
 // 首次加载页面时，让横线移动到第一个tab栏的位置
 nextTick(() => {
   handleMouseLeave()
@@ -67,9 +75,9 @@ nextTick(() => {
     ></div>
     <div
       v-for="(item, index) in props.tabList"
-      :key="item.name"
+      :key="item.index"
       ref="tabRef"
-      @click="((isTabActive = index), $router.push(item.path))"
+      @click="handleTabClick(index, item.path)"
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
       class="p-4 ease-linear flex items-center justify-center cursor-pointer font-sans"

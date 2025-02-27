@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import MyButton from '@/components/basic/MyButton.vue'
+import InputComponent from '@/components/basic/InputComponent.vue'
 
 //定义文件上传对象
 const fileInput = ref(null)
@@ -16,6 +17,11 @@ const avatarUrl = ref('@/assets/student/avatar.png') // 默认头像路径
 //处理文件上传
 const handleFileChange = (event) => {
   const file = event.target.files[0]
+  if (file.size > 10 * 1024 * 1024) {
+    // 限制文件大小不超过10MB
+    alert('文件大小不能超过10MB！')
+    return
+  }
   if (file) {
     const reader = new FileReader()
     reader.onload = (e) => {
@@ -29,25 +35,39 @@ const handleFileChange = (event) => {
 const reviseList = ref([
   {
     title: '修改昵称',
-    placeholder: '请输入昵称'
+    placeholder: '请输入昵称',
+    value: 'nickname'
   },
   {
     title: '修改国籍',
-    placeholder: '请输入国籍'
+    placeholder: '请输入国籍',
+    value: 'nationality'
   },
   {
     title: '修改地区',
-    placeholder: '请输入地区'
+    placeholder: '请输入地区',
+    value: 'region'
   },
   {
     title: '修改年龄',
-    placeholder: '请输入年龄'
+    placeholder: '请输入年龄',
+    value: 'age'
   },
   {
     title: '修改出生年月',
-    placeholder: '请输入出生年月'
+    placeholder: '请输入出生年月',
+    value: 'birthDate'
   }
 ])
+
+//定义修改参数
+const reviseParams = ref({
+  nickname: '',
+  nationality: '',
+  region: '',
+  age: '',
+  birthDate: ''
+})
 
 //处理修改事件
 const handleReviseEvent = () => {
@@ -56,7 +76,7 @@ const handleReviseEvent = () => {
 </script>
 
 <template>
-  <div class="h-full px-4 bg-orange-100">
+  <div class="h-full px-4 bg-blue-50">
     <div class="flex flex-col rounded-lg p-4">
       <!-- 修改头像 -->
       <div class="flex items-center my-4">
@@ -74,23 +94,21 @@ const handleReviseEvent = () => {
           @change="handleFileChange"
         />
       </div>
-      <!-- 其它 -->
-      <div
-        class="flex items-center mb-4"
-        v-for="item in reviseList"
-        :key="item.title"
-      >
-        <p class="mr-4 text-lg font-thin">{{ item.title }}</p>
-        <input
-          type="text"
-          class="border-2 rounded-lg focus:outline-none px-4 py-2 flex-1"
+      <!-- 其它修改 -->
+      <div v-for="item in reviseList" :key="item.title">
+        <InputComponent
+          :id="item.title"
+          roundedLg
           :placeholder="item.placeholder"
-        />
+          :innerLabel="false"
+          v-model="reviseParams[item.value]"
+          :label="item.title"
+        ></InputComponent>
       </div>
       <!-- 保存按钮 -->
       <MyButton
         type="primary"
-        class="w-1/4 mx-auto py-2 mt-4"
+        class="w-1/4 mx-auto py-2"
         @click="handleReviseEvent"
       >
         保存

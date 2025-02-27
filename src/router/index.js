@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { ref } from 'vue'
+// import { ref } from 'vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -116,17 +116,17 @@ const router = createRouter({
 //   }
 // });
 
-const transitionName = ref('slide-down') // 默认向下滑动
+// const transitionName = ref('slide-down') // 默认向下滑动
 
-router.beforeEach((to, from, next) => {
-  // 根据路由切换方向动态设置动画
-  if (to.meta.order > from.meta.order) {
-    transitionName.value = 'slide-down' // 向下滑动
-  } else {
-    transitionName.value = 'slide-up' // 向上滑动
-  }
-  next() //延迟500ms后执行路由跳转
-})
+// router.beforeEach((to, from, next) => {
+//   // 根据路由切换方向动态设置动画
+//   if (to.meta.order > from.meta.order) {
+//     transitionName.value = 'slide-down' // 向下滑动
+//   } else {
+//     transitionName.value = 'slide-up' // 向上滑动
+//   }
+//   next() //延迟500ms后执行路由跳转
+// })
 
 export default router
-export { transitionName }
+// export { transitionName }
