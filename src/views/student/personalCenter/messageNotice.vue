@@ -158,7 +158,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* 自定义滚动条 */
 /* 自定义滚动条样式 */
 .scrollBar::-webkit-scrollbar {
   width: 6px; /* 滚动条的宽度 */
