@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted, nextTick, onUnmounted } from 'vue' // 引入vue
 import MyButton from '@/components/basic/MyButton.vue'
+//引入路由
+import { useRouter } from 'vue-router'
+const router = useRouter()
 
 //定义容器盒子
 const container = ref(null)
@@ -366,6 +369,7 @@ const teacherCardList = ref([
           <MyButton
             :type="item.isSubscribe ? 'danger' : 'primary'"
             class="w-1/2 mx-auto mt-4"
+            @click="router.push('teacherDetail')"
             >{{ item.isSubscribe ? '已预约' : '预约上课' }}</MyButton
           >
         </div>

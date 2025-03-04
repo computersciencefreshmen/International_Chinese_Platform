@@ -1,36 +1,144 @@
 <script setup>
-import MyButton from '@/components/basic/MyButton.vue'
-import { ref, nextTick, onMounted } from 'vue'
+import CourseList from '@/components/service/CourseList.vue'
+import { ref } from 'vue'
+import { useRouter } from 'vue-router' //引入路由
 
-//已上课列表是否展开
-// const EdCursesShowMore = ref(false)
+const router = useRouter() //路由
 
-//未上课列表是否展开
-const toCursesShowMore = ref(false) // 控制展开和收起状态
-const contentRef = ref(null) // 获取内容容器的引用
-const contentHeight = ref(0) // 动态计算的内容高度
-
-const toggleShowMore = () => {
-  toCursesShowMore.value = !toCursesShowMore.value // 切换展开和收起状态
-  if (toCursesShowMore.value) {
-    nextTick(() => {
-      contentHeight.value = contentRef.value.scrollHeight // 动态获取内容的实际高度
-    })
+const courseList = ref([
+  {
+    title: '话题6 春节下的中国',
+    time: '2021-10-01 09:00',
+    teacher: 'Kimberly老师',
+    id: 1
+  },
+  {
+    title: '话题6 春节下的中国',
+    time: '2021-10-01 09:00',
+    teacher: 'Kimberly老师',
+    id: 2
+  },
+  {
+    title: '话题6 春节下的中国',
+    time: '2021-10-01 09:00',
+    teacher: 'Kimberly老师',
+    id: 3
+  },
+  {
+    title: '话题7 夏天下的中国',
+    time: '2021-10-10 09:00',
+    teacher: 'nb老师',
+    id: 4
+  },
+  {
+    title: '话题8 秋天下的中国',
+    time: '2021-10-11 09:00',
+    teacher: 'nb2老师',
+    id: 5
+  },
+  {
+    title: '话题9 冬天下的中国',
+    time: '2021-10-12 09:00',
+    teacher: 'nb3老师',
+    id: 6
+  },
+  {
+    title: '话题10 春天下的中国',
+    time: '2021-10-13 09:00',
+    teacher: 'nb4老师',
+    id: 7
+  },
+  {
+    title: '话题11 夏天下的中国',
+    time: '2021-10-14 09:00',
+    teacher: 'nb5老师',
+    id: 8
+  },
+  {
+    title: '话题12 秋天下的中国',
+    time: '2021-10-15 09:00',
+    teacher: 'nb6老师',
+    id: 9
+  },
+  {
+    title: '话题13 冬天下的中国',
+    time: '2021-10-16 09:00',
+    teacher: 'nb7老师',
+    id: 10
+  },
+  {
+    title: '话题14 春天下的中国',
+    time: '2021-10-17 09:00',
+    teacher: 'nb8老师',
+    id: 11
+  },
+  {
+    title: '话题15 夏天下的中国',
+    time: '2021-10-18 09:00',
+    teacher: 'nb9老师',
+    id: 12
+  },
+  {
+    title: '话题16 秋天下的中国',
+    time: '2021-10-19 09:00',
+    teacher: 'nb10老师',
+    id: 13
+  },
+  {
+    title: '话题17 冬天下的中国',
+    time: '2021-10-20 09:00',
+    teacher: 'nb11老师',
+    id: 14
+  },
+  {
+    title: '话题18 春天下的中国',
+    time: '2021-10-21 09:00',
+    teacher: 'nb12老师',
+    id: 15
+  },
+  {
+    title: '话题19 夏天下的中国',
+    time: '2021-10-22 09:00',
+    teacher: 'nb13老师',
+    id: 16
+  },
+  {
+    title: '话题20 秋天下的中国',
+    time: '2021-10-23 09:00',
+    teacher: 'nb14老师',
+    id: 17
+  },
+  {
+    title: '话题21 冬天下的中国',
+    time: '2021-10-24 09:00',
+    teacher: 'nb15老师',
+    id: 18
   }
+])
+
+// 进入课堂
+const enterClass = (id) => {
+  console.log('进入课堂', id)
 }
 
-onMounted(() => {
-  nextTick(() => {
-    contentHeight.value = contentRef.value.scrollHeight // 初始化内容高度
-  })
-})
+// 预习
+const preview = (id) => {
+  console.log('预习', id)
+  router.push('/student/chatTurn')
+}
+
+// 完成作业
+const finishWork = (id) => {
+  console.log('完成作业', id)
+  router.push('/student/homeWork')
+}
 </script>
 
 <template>
   <!-- 布局架子 -->
-  <div class="container bg-white mx-auto p-4">
+  <div class="container mx-auto p-4 h-screen">
     <!-- 布局容器 -->
-    <div class="bg-blue-50 rounded-lg p-4 flex flex-col">
+    <div class="bg-blue-50 rounded-lg p-4 flex flex-col h-full">
       <!-- 个人数据显示 -->
       <div class="flex items-center justify-between mb-4 p-4">
         <!-- 头像、名称等展示 -->
@@ -88,87 +196,25 @@ onMounted(() => {
         </p>
       </div>
       <!-- 课程详情 -->
+      <!-- 未上课列表 -->
       <div>
-        <!-- 未上课列表 -->
-        <div class="bg-white p-4 rounded-lg mt-4">
-          <p class="text-lg font-bold mb-2">未上课</p>
-          <!-- 列表 -->
-          <div
-            class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 text-center p-2 rounded-lg border-2 border-blue-100 cursor-pointer hover:border-blue-300 transition-all duration-300 ease-in-out"
-          >
-            <!-- 话题 -->
-            <p class="font-semibold">话题6 春节下的中国</p>
-            <!-- 课程时间 -->
-            <p>2021-10-01 09:00</p>
-            <!-- 课程老师 -->
-            <p>Kimberly老师</p>
-            <div class="flex-1 grid grid-cols-3 gap-4">
-              <MyButton type="primary">进入课堂</MyButton>
-              <MyButton type="primary">预习</MyButton>
-              <MyButton type="primary">完成作业</MyButton>
-            </div>
-          </div>
-
-          <!-- 其余项 -->
-          <div
-            ref="contentRef"
-            class="overflow-hidden transition-all duration-300 ease-in-out"
-            :style="{
-              maxHeight: toCursesShowMore ? contentHeight + 'px' : '0px'
-            }"
-          >
-            <div
-              v-for="i in 10"
-              :key="i"
-              class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 text-center p-2 rounded-lg border-2 border-blue-100 cursor-pointer hover:border-blue-300 transition-all duration-300 ease-in-out my-2"
-            >
-              <!-- 话题 -->
-              <p class="font-semibold">话题6 春节下的中国</p>
-              <!-- 课程时间 -->
-              <p>2021-10-01 09:00</p>
-              <!-- 课程老师 -->
-              <p>Kimberly老师</p>
-              <div class="flex-1 grid grid-cols-3 gap-4">
-                <MyButton type="primary">进入课堂</MyButton>
-                <MyButton type="primary">预习</MyButton>
-                <MyButton type="primary">完成作业</MyButton>
-              </div>
-            </div>
-          </div>
-          <!-- 展开/收起按钮 -->
-          <button
-            @click="toggleShowMore"
-            class="text-gray-400 text-sm mt-2 cursor-pointer"
-          >
-            {{ toCursesShowMore ? '收起' : '展开更多' }}
-          </button>
-        </div>
-        <!-- 已上课列表 -->
-        <div class="bg-white p-4 rounded-lg mt-4">
-          <p class="text-lg font-bold mb-2">未上课</p>
-          <div
-            class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 text-center p-2 rounded-lg border-2 border-blue-100 cursor-pointer"
-          >
-            <!-- 话题 -->
-            <p class="font-semibold">话题6 春节下的中国</p>
-            <!-- 课程时间 -->
-            <p>2021-10-01 09:00</p>
-            <!-- 课程老师 -->
-            <p>Kimberly老师</p>
-            <div class="flex-1 grid grid-cols-3 gap-4">
-              <MyButton type="primary">进入课堂</MyButton>
-              <MyButton type="primary">预习</MyButton>
-              <MyButton type="primary">完成作业</MyButton>
-            </div>
-          </div>
-          <!-- 展开/收起按钮 -->
-          <button
-            @click="toggleShowMore"
-            class="text-gray-400 text-sm mt-2 cursor-pointer"
-          >
-            {{ toCursesShowMore ? '收起' : '展开更多' }}
-          </button>
-        </div>
+        <CourseList
+          :course-list="courseList"
+          @enterClass="enterClass"
+          @preview="preview"
+          @finishWork="finishWork"
+          >未上课</CourseList
+        >
+      </div>
+      <!-- 已上课列表 -->
+      <div>
+        <CourseList
+          :course-list="courseList"
+          @enterClass="enterClass"
+          @preview="preview"
+          @finishWork="finishWork"
+          >已上课</CourseList
+        >
       </div>
     </div>
   </div>

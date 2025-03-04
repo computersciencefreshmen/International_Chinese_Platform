@@ -91,6 +91,32 @@ const router = createRouter({
                 import('@/views/student/personalCenter/messageNotice.vue')
             }
           ]
+        },
+        {
+          //话轮页面
+          path: 'chatTurn',
+          name: 'chatTurn',
+          component: () => import('@/views/student/chatTurn/chatTurn.vue')
+        },
+        {
+          //作业页面
+          path: 'homeWork',
+          name: 'homeWork',
+          component: () => import('@/views/student/homeWork/homeWork.vue')
+        },
+        {
+          //老师详情页面
+          path: 'teacherDetail',
+          name: 'teacherDetail',
+          component: () =>
+            import('@/views/student/orderTeacher/teacherDetail.vue')
+        },
+        {
+          //创建新的话轮并预约老师
+          path: 'createNewChat',
+          name: 'createNewChat',
+          component: () =>
+            import('@/views/student/orderTeacher/createNewChat.vue')
         }
       ]
     },

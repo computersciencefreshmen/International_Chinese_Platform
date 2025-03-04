@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, nextTick, onUnmounted } from 'vue' // 引入vue
+import selectorsBasic from '@/components/service/selectorsBasic.vue'
 
 //定义容器盒子
 const container = ref(null)
@@ -45,6 +46,98 @@ onUnmounted(() => {
   // 移除窗口大小变化的监听器
   window.removeEventListener('resize', handleResize)
 })
+
+//定义老师筛选列表
+const teacherFilterList = ref([
+  {
+    title: '教师评分',
+    placeholder: '请选择评分',
+    value: '',
+    list: [
+      {
+        label: '4.8分及以上',
+        value: 4.8
+      },
+      {
+        label: '4.5分及以上',
+        value: 4.5
+      },
+      {
+        label: '4.0分及以上',
+        value: 4.0
+      },
+      {
+        label: '3.5分及以上',
+        value: 3.5
+      },
+      {
+        label: '3.0分及以上',
+        value: 3.0
+      }
+    ]
+  },
+  {
+    title: '教学经验',
+    placeholder: '请选择教学经验',
+    value: '',
+    list: [
+      {
+        label: '5年及以上',
+        value: 5
+      },
+      {
+        label: '3年及以上',
+        value: 3
+      },
+      {
+        label: '1年及以上',
+        value: 1
+      }
+    ]
+  },
+  {
+    title: '擅长方向',
+    placeholder: '请选择擅长方向',
+    value: '',
+    list: [
+      {
+        label: '汉语口语',
+        value: '汉语口语'
+      },
+      {
+        label: '商务英语',
+        value: '商务英语'
+      },
+      {
+        label: '日语',
+        value: '日语'
+      },
+      {
+        label: '韩语',
+        value: '韩语'
+      }
+    ]
+  },
+  {
+    title: '教学风格',
+    placeholder: '请选择教学风格',
+    value: '',
+    list: [
+      {
+        label: '严谨',
+        value: '严谨'
+      },
+      {
+        label: '耐心',
+        value: '耐心'
+      },
+      {
+        label: '活泼',
+        value: '活泼'
+      }
+    ]
+  }
+])
 </script>
 
 <template>
@@ -52,7 +145,29 @@ onUnmounted(() => {
   <div ref="layout" class="container bg-white mx-auto p-4">
     <!-- 布局容器 -->
     <div ref="container" class="bg-blue-50 rounded-lg p-4 flex flex-col">
-      网课预约
+      <!-- 课程匹配条件 -->
+      <div class="bg-white rounded-lg p-4">
+        <!-- 标题 -->
+        <div class="flex mb-4">
+          <p class="text-lg font-bold bg-blue-300 px-2 py-1 rounded-lg">
+            课程匹配条件
+          </p>
+        </div>
+        <!-- 各种标准 -->
+        <div>
+          <!-- 教师评分 -->
+          <div class="grid grid-cols-2 gap-2 lg:w-1/2">
+            <selectorsBasic
+              v-for="item in teacherFilterList"
+              v-model="item.value"
+              :key="item.title"
+              :placeholder="item.placeholder"
+              :title="item.title"
+              :options="item.list"
+            />
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
