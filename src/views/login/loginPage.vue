@@ -97,7 +97,10 @@ const handleLogin = () => {
     <main class="flex-1 flex justify-center items-center overflow-hidden">
       <!-- 登录主体内容填写 -->
       <transition name="slide" mode="out-in">
-        <div v-if="isLogin" class="px-6 bg-primary rounded-2xl min-w-min py-4">
+        <div
+          v-if="isLogin"
+          class="px-6 bg-primary rounded-2xl min-w-min py-4 shadow-lg"
+        >
           <div class="ml-6 mb-2 mt-6">
             <p class="tracking-wide text-black text-3xl font-semibold">
               欢迎登陆

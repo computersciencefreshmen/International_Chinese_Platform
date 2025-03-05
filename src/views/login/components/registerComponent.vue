@@ -331,7 +331,7 @@ const handleMemberEnter = () => {
 </script>
 <template>
   <div
-    class="bg-primary rounded-2xl py-2 flex items-center justify-center w-2/3 overflow-hidden transition-all ease-in-out duration-500"
+    class="shadow-lg bg-primary rounded-2xl py-2 flex items-center justify-center w-2/3 overflow-hidden transition-all ease-in-out duration-500"
   >
     <transition name="slide" mode="out-in">
       <!-- 注册的初始化界面。-->

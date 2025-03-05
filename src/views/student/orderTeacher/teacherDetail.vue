@@ -253,7 +253,9 @@ const disabledDate = (time) => {
             <span>{{ record.keywords }}</span>
             <span>{{ record.selectedRound }}</span>
             <!-- 是否选择 -->
-            <MyButton type="primary" class="w-24 mx-auto">选择</MyButton>
+            <div class="flex items-center justify-center">
+              <MyButton type="primary" class="w-24">选择</MyButton>
+            </div>
             <!-- 预约时段 -->
             <el-date-picker
               v-model="record.appointmentTime"

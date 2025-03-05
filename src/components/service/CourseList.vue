@@ -37,7 +37,18 @@ onMounted(() => {
 <template>
   <!-- 未上课列表 -->
   <div class="bg-white p-4 rounded-lg mt-4">
-    <p class="text-lg font-bold mb-2"><slot></slot></p>
+    <!-- 首行标题和下拉按钮 -->
+    <div class="flex justify-between items-center mb-2">
+      <p class="text-lg font-bold"><slot></slot></p>
+      <!-- 展开/收起按钮 -->
+      <button
+        v-if="props.courseList.length > 1"
+        @click="toggleShowMore"
+        class="text-gray-400 text-sm cursor-pointer"
+      >
+        {{ showMore ? '收起' : '展开更多' }}
+      </button>
+    </div>
     <!-- 列表 -->
     <div
       v-if="props.courseList.length"
@@ -101,13 +112,5 @@ onMounted(() => {
         </div>
       </div>
     </div>
-    <!-- 展开/收起按钮 -->
-    <button
-      v-if="props.courseList.length > 1"
-      @click="toggleShowMore"
-      class="text-gray-400 text-sm mt-2 cursor-pointer"
-    >
-      {{ showMore ? '收起' : '展开更多' }}
-    </button>
   </div>
 </template>

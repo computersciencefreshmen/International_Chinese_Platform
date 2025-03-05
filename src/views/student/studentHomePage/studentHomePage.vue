@@ -163,7 +163,7 @@ const finishWork = (id) => {
           </div>
         </div>
         <!-- 横线隔开 -->
-        <div class="w-0.5 h-full bg-gray-300 mx-8"></div>
+        <div class="w-0.5 h-28 bg-gray-300 mx-8"></div>
         <!-- 积分、余额等展示 -->
         <div class="grid grid-cols-5 flex-1 gap-6">
           <div class="text-center lg:p-6 rounded-lg bg-white flex flex-col">

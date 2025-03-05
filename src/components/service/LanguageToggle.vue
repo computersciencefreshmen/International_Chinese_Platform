@@ -19,14 +19,24 @@ const changeLanguage = () => {
 </script>
 
 <template>
-  <select
+  <!-- <select
     class="w-full sm:py-2 sm:px-4 border border-gray-300 rounded-full shadow-sm outline-none"
     v-model="currentLocale"
     @change="changeLanguage"
   >
     <option value="zh">中文</option>
     <option value="en">English</option>
-  </select>
+  </select> -->
+  <el-select
+    placeholder="Select"
+    class="!w-28"
+    size="large"
+    v-model="currentLocale"
+    @change="changeLanguage"
+  >
+    <el-option label="中文" value="zh" />
+    <el-option label="English" value="en" />
+  </el-select>
 </template>
 
 <style scoped></style>

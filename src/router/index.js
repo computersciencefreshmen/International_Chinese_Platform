@@ -117,6 +117,13 @@ const router = createRouter({
           name: 'createNewChat',
           component: () =>
             import('@/views/student/orderTeacher/createNewChat.vue')
+        },
+        {
+          // 创建新的发布预约
+          path: 'createNewPublish',
+          name: 'createNewPublish',
+          component: () =>
+            import('@/views/student/publishOrder/CreateNewPublish.vue')
         }
       ]
     },

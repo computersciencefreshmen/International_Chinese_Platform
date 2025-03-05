@@ -366,12 +366,14 @@ const teacherCardList = ref([
             <li class="text-gray-500 text-sm">教学风格：{{ item.style }}</li>
           </div>
           <!-- 预约上课按钮 -->
-          <MyButton
-            :type="item.isSubscribe ? 'danger' : 'primary'"
-            class="w-1/2 mx-auto mt-4"
-            @click="router.push('teacherDetail')"
-            >{{ item.isSubscribe ? '已预约' : '预约上课' }}</MyButton
-          >
+          <div class="flex items-center justify-center mt-4">
+            <MyButton
+              :type="item.isSubscribe ? 'danger' : 'primary'"
+              class="w-1/2"
+              @click="router.push('teacherDetail')"
+              >{{ item.isSubscribe ? '已预约' : '预约上课' }}</MyButton
+            >
+          </div>
         </div>
       </main>
     </div>

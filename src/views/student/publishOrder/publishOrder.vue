@@ -1,6 +1,10 @@
 <script setup>
 import { ref, onMounted, nextTick, onUnmounted } from 'vue' // 引入vue
 import selectorsBasic from '@/components/service/selectorsBasic.vue'
+import MyButton from '@/components/basic/MyButton.vue'
+//引入路由
+import { useRouter } from 'vue-router'
+const router = useRouter()
 
 //定义容器盒子
 const container = ref(null)
@@ -77,67 +81,157 @@ const teacherFilterList = ref([
     ]
   },
   {
+    title: '课程内容',
+    placeholder: '请选择课程内容',
+    value: '',
+    list: [
+      {
+        label: '语法',
+        value: '语法'
+      },
+      {
+        label: '口语',
+        value: '口语'
+      }
+    ]
+  },
+  {
+    title: '教师擅长领域',
+    placeholder: '请选择擅长领域',
+    value: '',
+    list: [
+      {
+        label: '语法',
+        value: '语法'
+      },
+      {
+        label: '口语',
+        value: '口语'
+      }
+    ]
+  },
+  {
+    title: '学习目标',
+    placeholder: '请选择学习目标',
+    value: '',
+    list: [
+      {
+        label: '日常交流',
+        value: '日常交流'
+      },
+      {
+        label: '考试冲刺',
+        value: '考试冲刺'
+      },
+      {
+        label: '职场提升',
+        value: '职场提升'
+      },
+      {
+        label: '文化兴趣',
+        value: '文化兴趣'
+      }
+    ]
+  },
+  {
+    // 教学经验
     title: '教学经验',
     placeholder: '请选择教学经验',
     value: '',
     list: [
       {
-        label: '5年及以上',
-        value: 5
+        label: '5年以上',
+        value: '5年以上'
       },
       {
-        label: '3年及以上',
-        value: 3
+        label: '3-5年',
+        value: '3-5年'
       },
       {
-        label: '1年及以上',
-        value: 1
+        label: '1-3年',
+        value: '1-3年'
+      },
+      {
+        label: '不限',
+        value: '不限'
       }
     ]
   },
   {
-    title: '擅长方向',
-    placeholder: '请选择擅长方向',
+    //课程难度
+    title: '课程难度',
+    placeholder: '请选择课程难度',
     value: '',
     list: [
       {
-        label: '汉语口语',
-        value: '汉语口语'
+        label: '初级',
+        value: '初级'
       },
       {
-        label: '商务英语',
-        value: '商务英语'
+        label: '中级',
+        value: '中级'
       },
       {
-        label: '日语',
-        value: '日语'
-      },
-      {
-        label: '韩语',
-        value: '韩语'
-      }
-    ]
-  },
-  {
-    title: '教学风格',
-    placeholder: '请选择教学风格',
-    value: '',
-    list: [
-      {
-        label: '严谨',
-        value: '严谨'
-      },
-      {
-        label: '耐心',
-        value: '耐心'
-      },
-      {
-        label: '活泼',
-        value: '活泼'
+        label: '高级',
+        value: '高级'
       }
     ]
   }
 ])
+
+//定义历史记录
+const historyRecords = ref([
+  {
+    topic: '舌尖上的中国',
+    keywords: '美食、菜系、中国',
+    selectedRound: '话轮2',
+    appointmentTime: ''
+  },
+  {
+    topic: '中国的节日',
+    keywords: '春节、端午节、中秋节',
+    selectedRound: '话轮1',
+    appointmentTime: ''
+  },
+  {
+    topic: '中国的节日',
+    keywords: '春节、端午节、中秋节',
+    selectedRound: '话轮1',
+    appointmentTime: ''
+  },
+  {
+    topic: '中国的节日',
+    keywords: '春节、端午节、中秋节',
+    selectedRound: '话轮1',
+    appointmentTime: ''
+  },
+  {
+    topic: '中国的节日',
+    keywords: '春节、端午节、中秋节',
+    selectedRound: '话轮1',
+    appointmentTime: ''
+  },
+  {
+    topic: '中国的节日',
+    keywords: '春节、端午节、中秋节',
+    selectedRound: '话轮1',
+    appointmentTime: ''
+  }
+])
+
+//定义历史记录标题
+const historyTitle = ref([
+  '话题',
+  '关键词',
+  '选择话轮',
+  '是否选择',
+  '预约日期和时段'
+])
+
+// 禁用当前时间之前的所有日期
+const disabledDate = (time) => {
+  return time.getTime() < Date.now() // 禁用当前时间之前的所有日期
+}
 </script>
 
 <template>
@@ -146,7 +240,7 @@ const teacherFilterList = ref([
     <!-- 布局容器 -->
     <div ref="container" class="bg-blue-50 rounded-lg p-4 flex flex-col">
       <!-- 课程匹配条件 -->
-      <div class="bg-white rounded-lg p-4">
+      <div class="bg-white rounded-lg p-4 mb-4">
         <!-- 标题 -->
         <div class="flex mb-4">
           <p class="text-lg font-bold bg-blue-300 px-2 py-1 rounded-lg">
@@ -164,6 +258,55 @@ const teacherFilterList = ref([
               :placeholder="item.placeholder"
               :title="item.title"
               :options="item.list"
+            />
+          </div>
+        </div>
+      </div>
+      <!-- 话轮选择 -->
+      <div class="bg-white p-4 rounded-lg flex-1 overflow-y-auto scrollBar">
+        <!-- 标题 -->
+        <div class="flex items-center justify-between mb-4 space-x-2">
+          <div class="flex items-center space-x-2">
+            <h1 class="font-semibold py-1 px-2 bg-blue-300 rounded-lg">
+              选择历史话题
+            </h1>
+            <h1
+              @click="router.push('createNewPublish')"
+              class="font-semibold py-1 px-2 bg-yellow-300 rounded-lg cursor-pointer hover:bg-yellow-400 transition-all duration-300 ease-in-out"
+            >
+              生成新的话题
+            </h1>
+          </div>
+          <!-- 确认预约 -->
+          <MyButton type="primary" class="py-1 px-2 !bg-blue-300"
+            >确认发布</MyButton
+          >
+        </div>
+        <!-- 网格布局列表 -->
+        <div class="flex-1">
+          <!-- 表格标题 -->
+          <div class="grid grid-cols-5 font-semibold text-center gap-4">
+            <span v-for="title in historyTitle" :key="title">{{ title }}</span>
+          </div>
+          <!-- 表格内容 -->
+          <div
+            v-for="(record, index) in historyRecords"
+            :key="index"
+            class="grid grid-cols-5 text-center cursor-pointer border-2 border-white border-dashed hover:border-blue-200 my-2 rounded-lg transition-all duration-300 ease-in-out py-2"
+          >
+            <span>{{ record.topic }}</span>
+            <span>{{ record.keywords }}</span>
+            <span>{{ record.selectedRound }}</span>
+            <!-- 是否选择 -->
+            <div class="flex items-center justify-center">
+              <MyButton type="primary" class="w-24">选择</MyButton>
+            </div>
+            <!-- 预约时段 -->
+            <el-date-picker
+              v-model="record.appointmentTime"
+              type="datetime"
+              placeholder="请选择预约时间"
+              :disabled-date="disabledDate"
             />
           </div>
         </div>
