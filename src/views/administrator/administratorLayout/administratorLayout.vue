@@ -5,19 +5,19 @@ import logoComponent from '@/components/service/logoComponent.vue' //引入自�
 import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
 
 // 引入仓库
-import { useStudentStore } from '@/stores'
+import { useAdminStore } from '@/stores'
 
-const studentStore = useStudentStore()
+const adminStore = useAdminStore()
+
 // 引入路由
 import { useRouter } from 'vue-router'
 const router = useRouter()
 
 // tab切换内容设置
 const tabList = [
-  { name: '首页', path: '/student/home' },
-  { name: '预约老师', path: '/student/order' },
-  { name: '发布预约', path: '/student/publish' },
-  { name: '网络课程', path: '/student/course' }
+  { name: '课程对接', path: '/administrator/courseDocking' },
+  { name: '审核中心', path: '/administrator/auditCenter' },
+  { name: '数据中心', path: '/administrator/dataCenter' }
 ]
 
 //获取tab栏切换的盒子
@@ -83,7 +83,7 @@ const moveLineToFirstTab = () => {
 const handleTabClick = (number1, number2, path) => {
   activeTabIndex.value = number1
   router.push(path)
-  studentStore.isTabActive = number2
+  adminStore.isTabActive = number2
 }
 
 //定义导航栏容器高度
@@ -163,7 +163,9 @@ setTimeout(() => {
             @mouseenter="handleMouseEnter"
             @mouseleave="handleMouseLeave"
             :class="{ '!border-blue-300': activeTabIndex === 4 }"
-            @click="handleTabClick(4, 3, '/student/center/message')"
+            @click="
+              handleTabClick(4, 1, '/administrator/personalCenter/message')
+            "
           />
           <!-- 个人头像 -->
           <div
@@ -171,7 +173,13 @@ setTimeout(() => {
             ref="personalCenterRef"
             @mouseenter="handleMouseEnter"
             @mouseleave="handleMouseLeave"
-            @click="handleTabClick(5, 0, '/student/center/info')"
+            @click="
+              handleTabClick(
+                5,
+                0,
+                '/administrator/personalCenter/changePassword'
+              )
+            "
             :class="{ 'bg-blue-300': activeTabIndex === 5 }"
           >
             <img

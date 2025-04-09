@@ -2,6 +2,9 @@
 import TabSwitch from '@/components/basic/TabSwitch.vue'
 // import { transitionName } from '@/router' // 从路由配置中导入 transitionName
 
+import { useStudentStore } from '@/stores'
+const studentStore = useStudentStore()
+
 // 定义路由列表
 const routerList = [
   {
@@ -33,7 +36,10 @@ const routerList = [
     <!-- 左边导航栏 -->
     <aside class="w-36">
       <!-- 引入tab栏组件 -->
-      <TabSwitch :tabList="routerList"></TabSwitch>
+      <TabSwitch
+        :tabList="routerList"
+        :activeTabIndex="studentStore.isTabActive"
+      ></TabSwitch>
     </aside>
     <!-- 右边对应路由内容 -->
     <main class="flex-1 rounded-b-lg overflow-hidden">

@@ -62,7 +62,6 @@ const router = createRouter({
               // 个人信息模块
               path: 'info',
               name: 'personalInfo',
-              meta: { order: 1 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/personalInfo.vue')
             },
@@ -70,7 +69,6 @@ const router = createRouter({
               // 会员信息模块
               path: 'vip',
               name: 'vipInfo',
-              meta: { order: 2 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/vipInfo.vue')
             },
@@ -78,7 +76,6 @@ const router = createRouter({
               // 修改密码模块
               path: 'changePassword',
               name: 'changePassword',
-              meta: { order: 3 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/changePassword.vue')
             },
@@ -86,7 +83,6 @@ const router = createRouter({
               // 消息通知模块
               path: 'message',
               name: 'message',
-              meta: { order: 4 }, // 路由切换顺序
               component: () =>
                 import('@/views/student/personalCenter/messageNotice.vue')
             }
@@ -131,8 +127,73 @@ const router = createRouter({
       path: '/teacher',
       component: () =>
         import('@/views/teacher/teacherHomePage/teacherHomePage.vue')
+    },
+    {
+      path: '/administrator',
+      component: () =>
+        import(
+          '@/views/administrator/administratorLayout/administratorLayout.vue'
+        ),
+      redirect: '/administrator/courseDocking', // 重定向到首页
+      children: [
+        // 子路由配置
+        {
+          //课程对接模块
+          path: 'courseDocking', // 子路由路径
+          name: 'courseDocking',
+          component: () =>
+            import('@/views/administrator/courseDocking/courseDocking.vue')
+        },
+        {
+          //审核中心模块
+          path: 'auditCenter',
+          name: 'auditCenter',
+          component: () =>
+            import('@/views/administrator/auditCenter/auditCenter.vue')
+        },
+        {
+          //数据中心模块
+          path: 'dataCenter',
+          name: 'dataCenter',
+          component: () =>
+            import('@/views/administrator/dataCenter/dataCenter.vue')
+        },
+        {
+          //个人中心模块
+          path: 'personalCenter',
+          name: 'personalCenter',
+          redirect: '/administrator/personalCenter/changePassword', // 重定向到个人信息模块
+          component: () =>
+            import('@/views/administrator/personalCenter/personalCenter.vue'),
+          // 个人中心子路由
+          children: [
+            {
+              // 修改密码模块
+              path: 'changePassword',
+              name: 'changePassword',
+              component: () =>
+                import(
+                  '@/views/administrator/personalCenter/changePassword.vue'
+                )
+            },
+            {
+              // 消息通知模块
+              path: 'message',
+              name: 'message',
+              component: () =>
+                import('@/views/administrator/personalCenter/messageNotice.vue')
+            }
+          ]
+        }
+      ]
     }
   ]
+})
+
+router.beforeEach((to, from, next) => {
+  console.log('Navigating to:', to.fullPath)
+  console.log('Matched routes:', to.matched)
+  next()
 })
 
 // 全局前置守卫

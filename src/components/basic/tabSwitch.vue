@@ -1,7 +1,5 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
-import { usePersonalStore } from '@/stores'
-const personalStore = usePersonalStore() // 引入仓库
 import { useRouter } from 'vue-router'
 const router = useRouter()
 
@@ -10,11 +8,12 @@ import CustomModal from '@/components/basic/CustomModal.vue'
 
 // 接收props的导航栏参数
 const props = defineProps({
-  tabList: Array
+  tabList: Array,
+  activeTabIndex: Number
 })
 
 // 定义动态高亮tab栏下标
-const isTabActive = ref(personalStore.isTabActive)
+const isTabActive = ref(props.activeTabIndex)
 
 // 定义动态高亮背景横线
 const bgRef = ref(null)
@@ -49,7 +48,7 @@ const handleMouseLeave = () => {
 
 // 监听personalStore.isTabActive的变化
 watch(
-  () => personalStore.isTabActive,
+  () => props.activeTabIndex,
   (value) => {
     isTabActive.value = value
     handleMouseLeave() // 监听到变化后，为了让横线移动到高亮tab栏的位置
@@ -87,7 +86,7 @@ const handleExit = () => {
     ></div>
     <div
       v-for="(item, index) in props.tabList"
-      :key="item.index"
+      :key="item.id"
       ref="tabRef"
       @click="handleTabClick(index, item.path)"
       @mouseenter="handleMouseEnter"
