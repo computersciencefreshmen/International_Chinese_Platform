@@ -7,6 +7,18 @@ import InputComponent from '@/components/basic/InputComponent.vue' //引入自�
 import registerComponent from './components/registerComponent.vue' //引入自定义注册组件
 import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
 import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
+import { ElMessage } from 'element-plus' //引入element-plus的消息提示组件
+
+//引入api接口
+import { studentLogin } from '@/api/student.js'
+
+//引入路由
+import { useRouter } from 'vue-router'
+const router = useRouter()
+
+//引入学生仓库
+import { useStudentStore } from '@/stores'
+const studentStore = useStudentStore()
 
 //是否登录
 const isLogin = ref(true)
@@ -42,7 +54,22 @@ const errors = ref({
   password: ''
 })
 
-const handleLogin = () => {
+const handleStudentLogin = async () => {
+  const res = await studentLogin(formData.value.email, formData.value.password)
+  console.log(res)
+
+  if (res.data.code === 0) {
+    // 登录成功，跳转到学生主页
+    studentStore.setUserInfo(res.data.data)
+    ElMessage({
+      message: '登录成功',
+      type: 'success'
+    })
+    router.push('/student/home')
+  }
+}
+
+const handleLogin = async () => {
   // 清空之前的错误信息
   errors.value.email = ''
   errors.value.password = ''
@@ -58,8 +85,14 @@ const handleLogin = () => {
 
   // 如果没有错误，执行登录逻辑
   if (!errors.value.username && !errors.value.password) {
-    console.log('登录成功', formData.value)
-    // 这里可以发送请求到后端
+    //分身份登录
+    if (isActive.value === '我是学生') {
+      handleStudentLogin()
+    } else if (isActive.value === '我是老师') {
+      // 老师登录逻辑
+    } else if (isActive.value === '我是管理员') {
+      // 管理员登录逻辑
+    }
   }
 }
 </script>

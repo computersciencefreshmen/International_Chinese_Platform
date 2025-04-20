@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 
 const props = defineProps({
   type: {
@@ -43,10 +43,19 @@ const props = defineProps({
   countdownTime: {
     type: Number,
     default: 60 // 默认倒计时时间（秒）
+  },
+  isSendCode: {
+    type: Boolean,
+    default: false // 默认不显示倒计时
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'update:emailType'])
+const emit = defineEmits([
+  'update:modelValue',
+  'update:emailType',
+  'verificationCode',
+  'codeStarted'
+])
 
 const emailType = ref('') // 当前选择的邮箱类型
 // const throttleTimeout = ref(null) // 用于节流的定时器
@@ -69,19 +78,28 @@ const isCounting = ref(false) // 是否正在倒计时
 // }
 
 // 倒计时逻辑
-const startCountdown = () => {
-  if (isCounting.value) return // 如果已经在倒计时，直接返回
-  isCounting.value = true
-  countdown.value = props.countdownTime
+const startCountdown = async () => {
+  // 先触发验证
+  emit('verificationCode')
 
-  const interval = setInterval(() => {
-    if (countdown.value > 0) {
-      countdown.value--
-    } else {
-      clearInterval(interval)
-      isCounting.value = false
-    }
-  }, 1000)
+  // 等待父组件处理验证并更新props
+  await nextTick()
+
+  // 如果验证通过
+  if (props.isSendCode) {
+    isCounting.value = true
+    countdown.value = props.countdownTime
+    emit('codeStarted') // 通知父组件可以发送验证码
+
+    const interval = setInterval(() => {
+      if (countdown.value > 0) {
+        countdown.value--
+      } else {
+        clearInterval(interval)
+        isCounting.value = false
+      }
+    }, 1000)
+  }
 }
 </script>
 <template>

@@ -3,8 +3,60 @@ import optionsCp from './optionsCp.vue' //引入自定义选项组件
 import InputComponent from '@/components/basic/InputComponent.vue' //引入自定义输入框组件
 import MyButton from '@/components/basic/MyButton.vue' //引入自定义按钮组件
 import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
+import { ElMessage } from 'element-plus' //引入element-plus的消息提示组件
 import { ref } from 'vue'
 import { useRouter } from 'vue-router' //引入路由
+//引入接口
+import { studentRegister } from '@/api/student.js'
+//引入通用接口
+import { sendEmail } from '@/api/universal.js'
+
+//引入仓库
+import { useStudentStore } from '@/stores'
+const studentStore = useStudentStore()
+
+//注册时发送邮箱验证码
+const handleSendEmail = async () => {
+  //发送验证码
+  const res = await sendEmail(RegisterFormData.value.email + emailType.value)
+  console.log(res)
+  if (res.data.code === 400) {
+    //提醒用户发送验证码失败
+    ElMessage.error('邮箱已经被注册')
+  }
+}
+
+//学生注册
+const studentRegisterApi = async () => {
+  const res = await studentRegister(
+    RegisterFormData.value.email + emailType.value,
+    RegisterFormData.value.code,
+    RegisterFormData.value.password
+  )
+  console.log(res.data.data)
+  //保存token到本地
+  studentStore.setUserInfo(res.data.data)
+}
+
+const isSendCode = ref(false) //是否可以发送验证码
+
+//验证邮箱是否完成填写
+const handleSendCode = () => {
+  //校验邮箱是否完成填写
+  if (!RegisterFormData.value.email) {
+    errors.value.email = '邮箱不能为空'
+  } else if (emailType.value === '') {
+    errors.value.email = '请选择邮箱域名'
+  } else {
+    errors.value.email = ''
+  }
+
+  if (RegisterFormData.value.email && emailType.value) {
+    isSendCode.value = true //可以发送验证码
+  } else {
+    isSendCode.value = false //不可以发送验证码
+  }
+}
 
 const router = useRouter() //路由
 
@@ -103,18 +155,26 @@ const handleRegister = () => {
   }
   //是否同意用户协议
   if (!isAgreeList.value) {
-    alert('请同意用户协议')
+    //提示用户同意用户协议
+    ElMessage.warning('请同意用户协议！')
     return
   }
 
   //
   if (!isRegisterActive.value) {
     //提示用户选择注册身份
-    alert('请选择注册身份')
+    ElMessage.warning('请选择注册身份！')
     return
   }
 
-  //执行注册逻辑
+  //执行学生注册逻辑
+  if (isRegisterActive.value === '我是学生') {
+    //执行学生注册逻辑
+    console.log('学生注册逻辑', RegisterFormData.value)
+    studentRegisterApi() //执行学生注册逻辑
+  } else if (isRegisterActive.value === '我是老师') {
+    //执行老师注册逻辑
+  }
 
   //获取个人信息
   step.value.initial = false //隐藏注册的初始化界面
@@ -385,7 +445,9 @@ const handleMemberEnter = () => {
               id="code"
               label="验证码"
               :showCountdown="true"
-              @update:emailType="emailType = $event"
+              @verificationCode="handleSendCode"
+              @codeStarted="handleSendEmail"
+              :isSendCode="isSendCode"
               :error="errors.code"
             />
 

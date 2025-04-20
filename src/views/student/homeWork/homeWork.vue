@@ -2,6 +2,38 @@
 import { ref, onMounted, nextTick, onUnmounted } from 'vue' // 引入vue
 import { useRouter } from 'vue-router' //引入路由
 import MyButton from '@/components/basic/MyButton.vue'
+import { ElMessage } from 'element-plus' //引入element-plus的消息提示组件
+//引入api
+import { getStudentHomework } from '@/api/student.js'
+//引入仓库
+import { useStudentStore } from '@/stores'
+const studentStore = useStudentStore() //获取学生仓库
+
+//获取作业列表
+const homeworkList = ref([]) //作业列表
+const courseId = ref(1) //课程id
+const courseType = ref('口语课程') //课程类型
+
+const getHomeworkList = async () => {
+  const res = await getStudentHomework(
+    courseType,
+    courseId,
+    studentStore.getUserInfo().token
+  )
+  if (res.data.code === 0) {
+    homeworkList.value = res.data.data
+    console.log('作业列表', homeworkList.value)
+  } else {
+    // 登录失败，提示错误信息
+    ElMessage.error(res.data.msg)
+  }
+}
+
+onMounted(async () => {
+  // 页面加载完成后执行的逻辑
+  console.log('页面加载完成')
+  getHomeworkList() //获取作业列表
+})
 
 const router = useRouter() //路由
 

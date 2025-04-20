@@ -1,7 +1,19 @@
 <script setup>
 import CourseList from '@/components/service/CourseList.vue'
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router' //引入路由
+
+import { useStudentStore } from '@/stores' //引入学生仓库
+const studentStore = useStudentStore() //获取学生仓库
+
+onMounted(() => {
+  // 页面加载完成后执行的逻辑
+  console.log('页面加载完成')
+  // 获取学生信息
+  studentStore.getUserInfo()
+
+  console.log('学生信息', studentStore.getUserInfo())
+})
 
 const router = useRouter() //路由
 
@@ -119,6 +131,7 @@ const courseList = ref([
 // 进入课堂
 const enterClass = (id) => {
   console.log('进入课堂', id)
+  router.push('/student/liveClass')
 }
 
 // 预习
@@ -184,7 +197,9 @@ const finishWork = (id) => {
           </div>
           <div class="text-center lg:p-6 rounded-lg bg-white flex flex-col">
             <p class="text-lg font-bold text-gray-500 mb-2">积分</p>
-            <p class="text-lg font-bold">5000</p>
+            <p class="text-lg font-bold">
+              {{ studentStore.getUserInfo().point }}
+            </p>
           </div>
         </div>
       </div>

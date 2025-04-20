@@ -1,7 +1,60 @@
 <script setup>
-import { ref, onMounted, nextTick, onUnmounted } from 'vue' // 引入vue
+import { ref, onMounted, nextTick, onUnmounted, watch } from 'vue' // 引入vue
 import MyButton from '@/components/basic/MyButton.vue'
 import MySearchBox from '@/components/basic/MySearchBox.vue'
+import { ElMessage } from 'element-plus' //引入element-plus的消息提示组件
+//引入api
+import { getOnlineCoursesDetail, getOnlineCoursesList } from '@/api/student.js'
+//引入仓库
+import { useStudentStore } from '@/stores'
+const studentStore = useStudentStore() //获取学生仓库
+
+//获取课程列表
+// const courseList = ref([])
+const currentPage = ref(1) //当前页码
+const courseCategory = ref('grammar') //课程分类
+const title = ref('') //课程标题
+
+const getCourseList = async () => {
+  const res = await getOnlineCoursesList(
+    studentStore.getUserInfo().token,
+    currentPage.value,
+    10,
+    courseCategory.value,
+    title.value
+  )
+
+  console.log('课程列表', res)
+  if (res.data.code === 0) {
+    // courseList.value = res.data.data
+    console.log('课程列表', res)
+  } else {
+    // 登录失败，提示错误信息
+    ElMessage.error(res.data.msg)
+  }
+}
+
+//获取课程详情页
+const getCourseDetail = async (courseId) => {
+  const res = await getOnlineCoursesDetail(
+    studentStore.getUserInfo().token,
+    courseId
+  )
+  if (res.data.code === 0) {
+    // courseList.value = res.data.data
+    console.log('课程详情', res.data.data)
+  } else {
+    // 登录失败，提示错误信息
+    // ElMessage.error(res.data.msg)
+  }
+}
+
+onMounted(async () => {
+  // 页面加载完成后执行的逻辑
+  console.log('页面加载完成')
+  getCourseDetail(1) //获取课程详情
+  getCourseList()
+})
 
 //定义容器盒子
 const container = ref(null)
@@ -50,6 +103,16 @@ onUnmounted(() => {
 
 //定义是否是口语课程
 const isSpokenCourse = ref(true)
+
+//监听课程分类的变化
+watch(isSpokenCourse, (newVal) => {
+  if (newVal) {
+    courseCategory.value = 'speaking'
+  } else {
+    courseCategory.value = 'grammar'
+  }
+  getCourseList()
+})
 
 //定义动画方向
 const direction = ref('slide-left')

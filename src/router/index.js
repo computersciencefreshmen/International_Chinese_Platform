@@ -120,6 +120,11 @@ const router = createRouter({
           name: 'createNewPublish',
           component: () =>
             import('@/views/student/publishOrder/CreateNewPublish.vue')
+        },
+        {
+          path: 'liveClass',
+          name: 'liveClass',
+          component: () => import('@/views/liveClass/liveClass.vue')
         }
       ]
     },
@@ -160,8 +165,8 @@ const router = createRouter({
         },
         {
           //个人中心模块
-          path: 'personalCenter',
-          name: 'personalCenter',
+          path: 'center',
+          name: 'center',
           redirect: '/administrator/personalCenter/changePassword', // 重定向到个人信息模块
           component: () =>
             import('@/views/administrator/personalCenter/personalCenter.vue'),
@@ -169,8 +174,8 @@ const router = createRouter({
           children: [
             {
               // 修改密码模块
-              path: 'changePassword',
-              name: 'changePassword',
+              path: 'changePasswordAdmin',
+              name: 'changePasswordAdmin',
               component: () =>
                 import(
                   '@/views/administrator/personalCenter/changePassword.vue'
@@ -178,8 +183,8 @@ const router = createRouter({
             },
             {
               // 消息通知模块
-              path: 'message',
-              name: 'message',
+              path: 'AdminMessage',
+              name: 'AdminMessage',
               component: () =>
                 import('@/views/administrator/personalCenter/messageNotice.vue')
             }
@@ -199,35 +204,22 @@ router.beforeEach((to, from, next) => {
 // 全局前置守卫
 // router.beforeEach((to, from, next) => {
 //   // 假设有一个全局的用户状态
-//   const userRole = localStorage.getItem('userRole'); // 从本地存储或其他地方获取用户角色
+//   const userRole = localStorage.getItem('userRole') // 从本地存储或其他地方获取用户角色
 
 //   // 根据用户角色跳转到对应页面
 //   if (!userRole) {
 //     // 如果没有用户角色，跳转到登录页
-//     next({ path: '/' });
+//     next({ path: '/' })
 //   } else if (userRole === 'student') {
 //     // 如果是学生角色，跳转到学生端
-//     next({ path: '/student' });
+//     next({ path: '/student' })
 //   } else if (userRole === 'teacher') {
 //     // 如果是老师角色，跳转到老师端
-//     next({ path: '/teacher' });
+//     next({ path: '/teacher' })
 //   } else {
 //     // 如果角色未知，跳转到登录页
-//     next({ path: '/' });
+//     next({ path: '/' })
 //   }
-// });
-
-// const transitionName = ref('slide-down') // 默认向下滑动
-
-// router.beforeEach((to, from, next) => {
-//   // 根据路由切换方向动态设置动画
-//   if (to.meta.order > from.meta.order) {
-//     transitionName.value = 'slide-down' // 向下滑动
-//   } else {
-//     transitionName.value = 'slide-up' // 向上滑动
-//   }
-//   next() //延迟500ms后执行路由跳转
 // })
 
 export default router
-// export { transitionName }

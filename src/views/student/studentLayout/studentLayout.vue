@@ -1,8 +1,9 @@
 <script setup>
-import { ref, nextTick } from 'vue' //引入vue的计算属性
+import { ref, nextTick, watch, onUnmounted, onMounted } from 'vue' //引入vue的计算属性
 import MySearchBox from '@/components/basic/MySearchBox.vue' //引入自定义搜索框组件
 import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
 import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
+import { useWebSocket } from '@/utils/websocket.js'
 
 // 引入仓库
 import { useStudentStore } from '@/stores'
@@ -11,6 +12,51 @@ const studentStore = useStudentStore()
 // 引入路由
 import { useRouter } from 'vue-router'
 const router = useRouter()
+
+// 使用封装的 WebSocket
+const { send, status } = useWebSocket({
+  url: `ws://localhost:7788/websocket?token=${studentStore.getUserInfo().token}`,
+  onMessage: (event) => {
+    try {
+      console.log(event)
+
+      const data = JSON.parse(event.data)
+      messages.value.push(`收到消息: ${JSON.stringify(data)}`)
+    } catch (e) {
+      messages.value.push(`收到非JSON消息: ${event.data}`)
+      console.log(e)
+    }
+  },
+  onOpen: () => {
+    messages.value.push('连接已建立')
+  },
+  onClose: () => {
+    messages.value.push('连接已关闭')
+  },
+  onError: (error) => {
+    messages.value.push(`连接错误: ${error.message || '未知错误'}`)
+  }
+})
+
+const messages = ref([])
+
+// 发送消息函数
+const sendMessage = (message) => {
+  send(JSON.stringify(message))
+}
+
+// 实时监听连接状态
+watch(status, (newStatus) => {
+  if (newStatus === 'open') {
+    console.log('✅ 连接成功')
+  } else if (newStatus === 'close') {
+    console.error('❌ 连接失败')
+  }
+})
+
+onMounted(() => {
+  sendMessage('你好')
+})
 
 // tab切换内容设置
 const tabList = [
@@ -109,6 +155,11 @@ window.addEventListener('resize', handleMouseLeave)
 setTimeout(() => {
   moveLineToFirstTab()
 }, 200)
+
+// 组件卸载时断开连接
+onUnmounted(() => {
+  window.removeEventListener('resize', handleMouseLeave)
+})
 </script>
 
 <template>
