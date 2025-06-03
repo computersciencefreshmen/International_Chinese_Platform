@@ -124,6 +124,12 @@ const router = createRouter({
           path: 'liveClass',
           name: 'liveClass',
           component: () => import('@/views/liveClass/liveClass.vue')
+        },
+        {
+          // 数字人页面
+          path: 'digitalHuman',
+          name: 'digitalHuman',
+          component: () => import('@/views/student/digitalHuman/TeachDetails.vue')
         }
       ]
     },

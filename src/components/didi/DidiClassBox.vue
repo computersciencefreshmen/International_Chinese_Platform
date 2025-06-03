@@ -111,8 +111,7 @@ onMounted(() => {
         )
         // 用户点击"开启数字人"
         router.push({
-          path: '/student/digitalHuman/TeachDetails',
-          // 可根据需要传递参数
+          path: '/student/digitalHuman',
         })
       } catch {
         // 用户点击"再等一等"

@@ -249,7 +249,7 @@ const handleSubmit = () => {
     })
     ElMessage.success('发布成功，已添加到预约列表！')
     // 跳转到首页
-    router.push('/student/studentHomePage')
+    router.push('/student/home')
   } else {
     ElMessage.warning('请先选择预约时间！')
   }
