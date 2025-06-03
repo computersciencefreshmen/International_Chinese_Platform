@@ -5,7 +5,9 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router' //引入路由
 
 import { useStudentStore } from '@/stores' //引入学生仓库
+import { useStudentPersonStore } from '@/stores/modules/studentPerson'
 const studentStore = useStudentStore() //获取学生仓库
+const studentPersonStore = useStudentPersonStore()
 
 // 计算属性，获取用户信息
 const userInfo = computed(() => studentStore.getUserInfo())
@@ -91,23 +93,6 @@ const finishedCourseList = ref([
   }
 ])
 
-const appointmentList = ref([
-  {
-    id: 1,
-    topic: '中国的节日',
-    teacher: '王老师',
-    time: '2025-06-01 10:00',
-    status: '未上课'
-  },
-  {
-    id: 2,
-    topic: '舌尖上的中国',
-    teacher: '李老师',
-    time: '2025-06-02 14:00',
-    status: '未上课'
-  }
-])
-
 // 进入课堂
 const enterClass = (id) => {
   console.log('进入课堂', id)
@@ -184,7 +169,7 @@ const finishWork = (id) => {
         </div>
       </div>
       <!-- 滴滴上课组件 -->
-      <DidiClassBox :appointments="appointmentList" class="mb-6" />
+      <DidiClassBox :appointments="studentPersonStore.appointmentList" class="mb-6" />
       <!-- 每日佳句 -->
       <div class="bg-white p-4 rounded-lg flex items-center">
         <p class="text-lg font-bold mr-8">每日佳句</p>

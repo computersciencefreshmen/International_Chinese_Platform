@@ -240,8 +240,12 @@ const handleSubmit = () => {
   // 模拟：取第一个有预约时间的记录作为预约信息
   const appointment = historyRecords.value.find(r => r.appointmentTime)
   if (appointment) {
+    // 构造完整的预约对象
     studentPersonStore.addAppointment({
-      ...appointment
+      topic: appointment.topic,
+      keywords: appointment.keywords,
+      selectedRound: appointment.selectedRound,
+      appointmentTime: appointment.appointmentTime
     })
     ElMessage.success('发布成功，已添加到预约列表！')
     // 跳转到首页
