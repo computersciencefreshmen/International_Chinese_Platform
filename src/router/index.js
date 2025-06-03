@@ -130,8 +130,54 @@ const router = createRouter({
     },
     {
       path: '/teacher',
-      component: () =>
-        import('@/views/teacher/teacherHomePage/teacherHomePage.vue')
+      component: () => import('@/views/teacher/LayoutPage/LayoutPage.vue'),
+      redirect: '/teacher/home', // 重定向到首页
+      children: [
+        // 首页
+        {
+          path: 'home',
+          name: 'home',
+          component: () =>
+            import('@/views/teacher/teacherHomePage/teacherHomePage.vue')
+        },
+        // 授课对接模块
+        {
+          path: 'teachingDocking',
+          name: 'teachingDocking',
+          component: () =>
+            import(
+              '@/views/teacher/TeachingDockingPage/teachingDockingPage.vue'
+            )
+        },
+        // 网络课程模块
+        {
+          path: 'onlineCourses',
+          name: 'onlineCourses',
+          component: () =>
+            import('@/views/teacher/OnlineCoursesPage/OnlineCoursesPage.vue'),
+          children: []
+        },
+        // 个人中心模块
+        {
+          path: 'user',
+          name: 'user',
+          component: () => import('@/views/teacher/UserPage/UserPage.vue')
+        },
+        // 上传课程模块
+        {
+          path: 'uploadCourses',
+          name: 'uploadCourses',
+          component: () =>
+            import('@/views/teacher/UploadCoursesPage/UploadCoursesPage.vue')
+        },
+        // 课程详情模块
+        {
+          path: 'courseDetails',
+          name: 'courseDetails',
+          component: () =>
+            import('@/views/teacher/CourseDetailsPage/CourseDetailsPage.vue')
+        }
+      ]
     },
     {
       path: '/administrator',
