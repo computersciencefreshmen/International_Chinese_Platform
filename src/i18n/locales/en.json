@@ -1,0 +1,12 @@
+{
+    "welcome": "Welcome",
+    "message": {
+      "hello": "Hello, {name}!"
+    },
+    "button": {
+      "submit": "Submit",
+      "cancel": "Cancel"
+    },
+    "login":"Login",
+    "register":"Register"
+  }
