@@ -139,6 +139,36 @@ const router = createRouter({
         import('@/views/teacher/teacherHomePage/teacherHomePage.vue')
     },
     {
+      path: '/teacher/onlineCourses',
+      component: () =>
+        import('@/views/teacher/OnlineCoursesPage/OnlineCoursesPage.vue')
+    },
+    {
+      path: '/teacher/courseDetails',
+      component: () =>
+        import('@/views/teacher/CourseDetailsPage/CourseDetailsPage.vue')
+    },
+    {
+      path: '/teacher/layout',
+      component: () =>
+        import('@/views/teacher/LayoutPage/LayoutPage.vue')
+    },
+    {
+      path: '/teacher/teachingDocking',
+      component: () =>
+        import('@/views/teacher/TeachingDockingPage/TeachingDockingPage.vue')
+    },
+    {
+      path: '/teacher/uploadCourses',
+      component: () =>
+        import('@/views/teacher/UploadCoursesPage/UploadCoursesPage.vue')
+    },
+    {
+      path: '/teacher/user',
+      component: () =>
+        import('@/views/teacher/UserPage/UserPage.vue')
+    },
+    {
       path: '/administrator',
       component: () =>
         import(
@@ -201,8 +231,7 @@ const router = createRouter({
   ]
 })
 
-// 添加路由守卫
-// 添加路由守卫
+// 修改路由守卫，取消教师端的登录限制
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
   const hasToken = userStore.token
@@ -214,13 +243,13 @@ router.beforeEach(async (to, from, next) => {
     return
   }
   
-  // 如果有 token
-  if (hasToken) {
+  if (to.path.startsWith('/teacher')) {
+    // 教师端直接放行，无需登录
+    next()
+  } else if (hasToken) {
     if (userStore.role) {
       // 根据用户角色判断是否可以访问
       if (userStore.role === 'student' && to.path.startsWith('/student')) {
-        next()
-      } else if (userStore.role === 'teacher' && to.path.startsWith('/teacher')) {
         next()
       } else if (userStore.role === 'administrator' && to.path.startsWith('/administrator')) {
         next()
@@ -228,8 +257,6 @@ router.beforeEach(async (to, from, next) => {
         // 如果角色和目标路由不匹配，重定向到对应角色首页
         if (userStore.role === 'student') {
           next('/student/home')
-        } else if (userStore.role === 'teacher') {
-          next('/teacher/home')
         } else {
           next('/administrator/home')
         }
@@ -238,7 +265,7 @@ router.beforeEach(async (to, from, next) => {
       try {
         await userStore.getUserInfo()
         next({ ...to, replace: true })
-      } catch (error) {
+      } catch {
         userStore.clearToken()
         next('/login')
       }
