@@ -1,36 +1,40 @@
-# vue3项目初始化
+# International Chinese Platform
 
-#### Description
-vue3项目初始化
+International Chinese Platform is a Vue 3 prototype for personalized Chinese-language education. It includes separate student, teacher, and administrator workspaces, making it closer to an education SaaS prototype than a simple landing page.
 
-#### Software Architecture
-Software architecture description
+## Highlights
 
-#### Installation
+- Student dashboard for teacher booking, learning requests, courses, chat, homework, live classes, and personal settings.
+- Teacher dashboard for teaching docking, online courses, course uploads, and user information.
+- Administrator dashboard for course docking, audit center, data center, and account-center workflows.
+- Vue Router nested routing with role-based page groups.
+- Pinia state management, Element Plus UI, Axios integration, and Vite build tooling.
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+## Stack
 
-#### Instructions
+- Vue 3
+- Vite
+- Vue Router
+- Pinia
+- Element Plus
+- Tailwind CSS
+- Axios
+- ESLint and Prettier
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+## Development
 
-#### Contribution
+```bash
+npm install
+npm run dev
+```
 
-1.  Fork the repository
-2.  Create Feat_xxx branch
-3.  Commit your code
-4.  Create Pull Request
+## Production Build
 
+```bash
+npm run build
+npm run preview
+```
 
-#### Gitee Feature
+## Why This Project Matters
 
-1.  You can use Readme\_XXX.md to support different languages, such as Readme\_en.md, Readme\_zh.md
-2.  Gitee blog [blog.gitee.com](https://blog.gitee.com)
-3.  Explore open source project [https://gitee.com/explore](https://gitee.com/explore)
-4.  The most valuable open source project [GVP](https://gitee.com/gvp)
-5.  The manual of Gitee [https://gitee.com/help](https://gitee.com/help)
-6.  The most popular members  [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+The repository demonstrates how to structure a multi-role frontend application for an education platform. It can be extended with authentication, backend APIs, course scheduling, homework submission, live-class integration, and analytics dashboards.
