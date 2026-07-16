@@ -1,9 +1,10 @@
 <script setup>
-import { ref, nextTick, watch, onUnmounted, onMounted } from 'vue' //引入vue的计算属性
+import { ref, nextTick, watch, onUnmounted } from 'vue' //引入vue的计算属性
 import MySearchBox from '@/components/basic/MySearchBox.vue' //引入自定义搜索框组件
 import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
 import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
 import { useWebSocket } from '@/utils/websocket.js'
+import { createWebSocketUrl } from '@/config/runtime'
 
 // 引入仓库
 import { useStudentStore } from '@/stores'
@@ -13,49 +14,37 @@ const studentStore = useStudentStore()
 import { useRouter } from 'vue-router'
 const router = useRouter()
 
-// 使用封装的 WebSocket
-const { send, status } = useWebSocket({
-  url: `ws://localhost:7788/websocket?token=${studentStore.getUserInfo().token}`,
-  onMessage: (event) => {
-    try {
-      console.log(event)
-
-      const data = JSON.parse(event.data)
-      messages.value.push(`收到消息: ${JSON.stringify(data)}`)
-    } catch (e) {
-      messages.value.push(`收到非JSON消息: ${event.data}`)
-      console.log(e)
-    }
-  },
-  onOpen: () => {
-    messages.value.push('连接已建立')
-  },
-  onClose: () => {
-    messages.value.push('连接已关闭')
-  },
-  onError: (error) => {
-    messages.value.push(`连接错误: ${error.message || '未知错误'}`)
-  }
-})
-
+const userInfo = studentStore.getUserInfo()
+const token = userInfo?.token
+const canConnectWebSocket = Boolean(token && String(token).trim())
 const messages = ref([])
 
-// 发送消息函数
-const sendMessage = (message) => {
-  send(JSON.stringify(message))
-}
+// 未登录时不创建 WebSocket 实例，避免空 token 触发连接或重连
+const status = canConnectWebSocket
+  ? useWebSocket({
+      url: createWebSocketUrl(token),
+      onMessage: (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          messages.value.push(`收到消息: ${JSON.stringify(data)}`)
+        } catch {
+          messages.value.push(`收到非JSON消息: ${event.data}`)
+        }
+      },
+      onOpen: () => {
+        messages.value.push('连接已建立')
+      },
+      onError: (error) => {
+        messages.value.push(`连接错误: ${error?.message || '未知错误'}`)
+      }
+    }).status
+  : ref('closed')
 
 // 实时监听连接状态
 watch(status, (newStatus) => {
-  if (newStatus === 'open') {
-    console.log('✅ 连接成功')
-  } else if (newStatus === 'close') {
-    console.error('❌ 连接失败')
+  if (newStatus === 'closed') {
+    messages.value.push('连接已关闭')
   }
-})
-
-onMounted(() => {
-  sendMessage('你好')
 })
 
 // tab切换内容设置
@@ -83,6 +72,8 @@ const personalCenterRef = ref(null)
 
 //定义设置高亮横线位置函数
 const placeHightLine = (left, width) => {
+  if (!lineRef.value) return
+
   lineRef.value.style.left = left + 'px'
   lineRef.value.style.width = width + 'px'
 }
@@ -107,6 +98,8 @@ const handleMouseLeave = () => {
     // 如果activeTabIndex的值等于5，则获取个人中心高亮盒子的位置
     activeTab = personalCenterRef.value
   }
+
+  if (!activeTab) return
 
   const { left, width } = activeTab.getBoundingClientRect()
   placeHightLine(left, width)
@@ -143,6 +136,8 @@ const fakeHeader = ref(null)
 
 //一进页面就计算导航栏的高度
 const handleContainerHeight = () => {
+  if (!headerRef.value || !fakeHeader.value) return
+
   //获取导航栏的高度
   containerHeight.value = headerRef.value.offsetHeight
   //设置占位盒子的高度
@@ -152,12 +147,13 @@ const handleContainerHeight = () => {
 //监听窗口大小变化，改变高亮线的位置
 window.addEventListener('resize', handleMouseLeave)
 
-setTimeout(() => {
+const moveLineTimer = window.setTimeout(() => {
   moveLineToFirstTab()
 }, 200)
 
 // 组件卸载时断开连接
 onUnmounted(() => {
+  window.clearTimeout(moveLineTimer)
   window.removeEventListener('resize', handleMouseLeave)
 })
 </script>

@@ -1,19 +1,14 @@
 <script setup>
 import CourseList from '@/components/service/CourseList.vue'
-import { ref, onMounted } from 'vue'
+import DidiClassBox from '@/components/didi/DidiClassBox.vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router' //引入路由
 
 import { useStudentStore } from '@/stores' //引入学生仓库
 const studentStore = useStudentStore() //获取学生仓库
 
-onMounted(() => {
-  // 页面加载完成后执行的逻辑
-  console.log('页面加载完成')
-  // 获取学生信息
-  studentStore.getUserInfo()
-
-  console.log('学生信息', studentStore.getUserInfo())
-})
+const userInfo = computed(() => studentStore.getUserInfo() || {})
+const userPoint = computed(() => userInfo.value.point || 0)
 
 const router = useRouter() //路由
 
@@ -130,28 +125,25 @@ const courseList = ref([
 
 // 进入课堂
 const enterClass = (id) => {
-  console.log('进入课堂', id)
-  router.push('/student/liveClass')
+  router.push({ path: '/student/liveClass', query: { courseId: id } })
 }
 
 // 预习
 const preview = (id) => {
-  console.log('预习', id)
-  router.push('/student/chatTurn')
+  router.push({ path: '/student/chatTurn', query: { courseId: id } })
 }
 
 // 完成作业
 const finishWork = (id) => {
-  console.log('完成作业', id)
-  router.push('/student/homeWork')
+  router.push({ path: '/student/homeWork', query: { courseId: id } })
 }
 </script>
 
 <template>
   <!-- 布局架子 -->
-  <div class="container mx-auto p-4 h-screen">
+  <div class="container mx-auto min-h-screen p-4">
     <!-- 布局容器 -->
-    <div class="bg-blue-50 rounded-lg p-4 flex flex-col h-full">
+    <div class="bg-blue-50 rounded-lg p-4 flex flex-col min-h-full">
       <!-- 个人数据显示 -->
       <div class="flex items-center justify-between mb-4 p-4">
         <!-- 头像、名称等展示 -->
@@ -163,7 +155,7 @@ const finishWork = (id) => {
           />
           <div class="flex flex-col">
             <div class="flex justify-center items-center mb-1">
-              <p class="text-lg font-bold">Kimberly</p>
+              <p class="text-lg font-bold">{{ userInfo.name || '学习者' }}</p>
               <img
                 src="@/assets/student/vip.png"
                 class="h-6 w-6 ml-1"
@@ -171,7 +163,7 @@ const finishWork = (id) => {
               />
             </div>
             <p class="text-sm py-1 px-2 bg-yellow-300 rounded-full text-center">
-              HKS3
+              {{ userInfo.level || 'HSK 3' }}
             </p>
           </div>
         </div>
@@ -198,7 +190,7 @@ const finishWork = (id) => {
           <div class="text-center lg:p-6 rounded-lg bg-white flex flex-col">
             <p class="text-lg font-bold text-gray-500 mb-2">积分</p>
             <p class="text-lg font-bold">
-              {{ studentStore.getUserInfo().point }}
+              {{ userPoint }}
             </p>
           </div>
         </div>
@@ -210,6 +202,7 @@ const finishWork = (id) => {
           天生我材必有用，千金散尽还复来。 —— 唐·李白 《将进酒》
         </p>
       </div>
+      <DidiClassBox class="mt-4" />
       <!-- 课程详情 -->
       <!-- 未上课列表 -->
       <div>

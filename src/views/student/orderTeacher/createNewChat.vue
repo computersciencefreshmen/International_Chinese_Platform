@@ -1,14 +1,39 @@
 <script setup>
 import { ref } from 'vue' // 引入vue
+import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { useStudentPersonStore } from '@/stores/modules/studentPerson'
 import CreateChatTurn from '../chatTurn/components/CreateChatTurn.vue'
 import MyButton from '@/components/basic/MyButton.vue'
 
+const router = useRouter()
+const studentPersonStore = useStudentPersonStore()
+
 //定义预约的时间
 const appointmentTime = ref('')
+const teacherName = ref('')
 
 // 禁用当前时间之前的所有日期
 const disabledDate = (time) => {
   return time.getTime() < Date.now() // 禁用当前时间之前的所有日期
+}
+
+const handleSubmit = () => {
+  if (!appointmentTime.value || !teacherName.value.trim()) {
+    ElMessage.warning('请选择预约时间并填写老师名称')
+    return
+  }
+
+  studentPersonStore.addAppointment({
+    topic: '个性化中文课程',
+    keywords: '待课堂确认',
+    selectedRound: '预约教师',
+    appointmentTime: appointmentTime.value,
+    teacherName: teacherName.value.trim(),
+    createdAt: new Date().toISOString()
+  })
+  ElMessage.success('预约已保存')
+  router.push('/student/home')
 }
 </script>
 
@@ -35,13 +60,17 @@ const disabledDate = (time) => {
         <div class="flex items-center space-x-2">
           <p>预约老师</p>
           <input
+            v-model="teacherName"
             type="text"
             placeholder="请输入老师名称"
             class="outline-none hover:border-blue-300 border-blue-50 rounded-md px-2 border-2"
           />
         </div>
         <!-- 确认预约 -->
-        <MyButton type="primary" class="py-1 px-2 !bg-blue-300"
+        <MyButton
+          type="primary"
+          class="py-1 px-2 !bg-blue-300"
+          @click="handleSubmit"
           >确认预约</MyButton
         >
       </div>

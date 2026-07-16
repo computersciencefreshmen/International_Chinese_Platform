@@ -11,36 +11,27 @@ import { ElMessage } from 'element-plus' //引入element-plus的消息提示组�
 
 //引入api接口
 import { studentLogin } from '@/api/student.js'
+import { loginByRole } from '@/api/user.js'
 
 //引入路由
 import { useRouter } from 'vue-router'
 const router = useRouter()
 
-//引入学生仓库
-import { useStudentStore } from '@/stores'
+//引入用户仓库
+import { useStudentStore, useUserStore } from '@/stores'
 const studentStore = useStudentStore()
+const userStore = useUserStore()
 
 //是否登录
 const isLogin = ref(true)
 
-//处理登录还是注册的点击事件
-const handleClick = (event) => {
-  //判断点击的是登录还是注册
-  if (event.target.innerText === '登录') {
-    //点击的是登录
-    isLogin.value = true
-  } else {
-    //点击的是注册
-    isLogin.value = false
-  }
-}
-
-//高亮身份
-const isActive = ref(null)
-
-//处理选择身份的点击事件
-const handleIsActive = (event) => {
-  isActive.value = event.target.innerText || event.target.alt
+const selectedRole = ref('student')
+const acceptedTerms = ref(false)
+const isSubmitting = ref(false)
+const roleRoutes = {
+  student: '/student/home',
+  teacher: '/teacher/home',
+  administrator: '/administrator/courseDocking'
 }
 
 // 收集登录输入框信息
@@ -53,21 +44,6 @@ const errors = ref({
   email: '',
   password: ''
 })
-
-const handleStudentLogin = async () => {
-  const res = await studentLogin(formData.value.email, formData.value.password)
-  console.log(res)
-
-  if (res.data.code === 0) {
-    // 登录成功，跳转到学生主页
-    studentStore.setUserInfo(res.data.data)
-    ElMessage({
-      message: '登录成功',
-      type: 'success'
-    })
-    router.push('/student/home')
-  }
-}
 
 const handleLogin = async () => {
   // 清空之前的错误信息
@@ -83,16 +59,47 @@ const handleLogin = async () => {
     errors.value.password = '密码不能为空'
   }
 
-  // 如果没有错误，执行登录逻辑
-  if (!errors.value.username && !errors.value.password) {
-    //分身份登录
-    if (isActive.value === '我是学生') {
-      handleStudentLogin()
-    } else if (isActive.value === '我是老师') {
-      // 老师登录逻辑
-    } else if (isActive.value === '我是管理员') {
-      // 管理员登录逻辑
+  if (errors.value.email || errors.value.password) {
+    return
+  }
+
+  if (!acceptedTerms.value) {
+    ElMessage.warning('请先阅读并同意用户服务协议和隐私协议')
+    return
+  }
+
+  isSubmitting.value = true
+  try {
+    const response =
+      selectedRole.value === 'student'
+        ? await studentLogin(formData.value.email, formData.value.password)
+        : await loginByRole(
+            selectedRole.value,
+            formData.value.email,
+            formData.value.password
+          )
+
+    if (response.data?.code !== 0) {
+      throw new Error(response.data?.msg || '登录失败，请检查账号信息')
     }
+
+    const profile = response.data.data || {}
+    userStore.setSession(selectedRole.value, profile)
+    if (selectedRole.value === 'student') {
+      studentStore.setUserInfo(profile)
+    }
+
+    ElMessage.success('登录成功')
+    const requestedPath = router.currentRoute.value.query.redirect
+    await router.replace(
+      typeof requestedPath === 'string'
+        ? requestedPath
+        : roleRoutes[selectedRole.value]
+    )
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || error.message || '登录失败')
+  } finally {
+    isSubmitting.value = false
   }
 }
 </script>
@@ -117,11 +124,11 @@ const handleLogin = async () => {
           type="primary"
           class="text-black"
           size="large"
-          @click="handleClick"
+          @click="isLogin = true"
           >登录</MyButton
         >
         <!-- 注册按钮 -->
-        <MyButton type="danger" size="large" @click="handleClick"
+        <MyButton type="danger" size="large" @click="isLogin = false"
           >注册</MyButton
         >
       </div>
@@ -146,8 +153,8 @@ const handleLogin = async () => {
             <div class="flex items-center mt-4 w-full">
               <optionsCp
                 text="我是学生"
-                :isActive="isActive === '我是学生'"
-                @click="handleIsActive"
+                :isActive="selectedRole === 'student'"
+                @click="selectedRole = 'student'"
               >
                 <img
                   class="w-10 h-10"
@@ -157,8 +164,8 @@ const handleLogin = async () => {
               </optionsCp>
               <optionsCp
                 text="我是老师"
-                @click="handleIsActive"
-                :isActive="isActive === '我是老师'"
+                @click="selectedRole = 'teacher'"
+                :isActive="selectedRole === 'teacher'"
               >
                 <img
                   class="w-12 h-12"
@@ -168,8 +175,8 @@ const handleLogin = async () => {
               </optionsCp>
               <optionsCp
                 text="我是管理员"
-                @click="handleIsActive"
-                :isActive="isActive === '我是管理员'"
+                @click="selectedRole = 'administrator'"
+                :isActive="selectedRole === 'administrator'"
               >
                 <img
                   class="w-10 h-10"
@@ -203,7 +210,7 @@ const handleLogin = async () => {
               <a href="#" class="text-black text-sm">忘记密码？</a>
               <!-- 我已同意 -->
               <div class="flex items-center mt-2">
-                <input type="checkbox" class="mr-2" />
+                <input v-model="acceptedTerms" type="checkbox" class="mr-2" />
                 <p class="text-sm">我已阅读并同意</p>
                 <a href="#" class="text-blue-500 text-sm">《用户服务协议》</a>
                 <p class="text-sm">和</p>
@@ -212,6 +219,8 @@ const handleLogin = async () => {
               <MyButton
                 type="primary"
                 class="mt-4 w-36 py-2 text-black"
+                :loading="isSubmitting"
+                :disabled="isSubmitting"
                 @click="handleLogin"
                 >登录</MyButton
               >

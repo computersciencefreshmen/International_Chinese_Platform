@@ -1,5 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
-// import { ref } from 'vue'
+import { useStudentStore, useUserStore } from '@/stores'
+
+const roleHome = {
+  student: '/student/home',
+  teacher: '/teacher/home',
+  administrator: '/administrator/courseDocking'
+}
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -17,6 +23,7 @@ const router = createRouter({
       path: '/student',
       component: () =>
         import('@/views/student/studentLayout/studentLayout.vue'),
+      meta: { requiresAuth: true, role: 'student' },
       redirect: '/student/home', // 重定向到首页
       children: [
         // 子路由配置
@@ -125,12 +132,19 @@ const router = createRouter({
           path: 'liveClass',
           name: 'liveClass',
           component: () => import('@/views/liveClass/liveClass.vue')
+        },
+        {
+          path: 'digitalHuman',
+          name: 'digitalHuman',
+          component: () =>
+            import('@/views/student/digitalHuman/TeachDetails.vue')
         }
       ]
     },
     {
       path: '/teacher',
       component: () => import('@/views/teacher/LayoutPage/LayoutPage.vue'),
+      meta: { requiresAuth: true, role: 'teacher' },
       redirect: '/teacher/home', // 重定向到首页
       children: [
         // 首页
@@ -185,6 +199,7 @@ const router = createRouter({
         import(
           '@/views/administrator/administratorLayout/administratorLayout.vue'
         ),
+      meta: { requiresAuth: true, role: 'administrator' },
       redirect: '/administrator/courseDocking', // 重定向到首页
       children: [
         // 子路由配置
@@ -213,7 +228,7 @@ const router = createRouter({
           //个人中心模块
           path: 'center',
           name: 'center',
-          redirect: '/administrator/personalCenter/changePassword', // 重定向到个人信息模块
+          redirect: '/administrator/center/changePasswordAdmin',
           component: () =>
             import('@/views/administrator/personalCenter/personalCenter.vue'),
           // 个人中心子路由
@@ -237,35 +252,43 @@ const router = createRouter({
           ]
         }
       ]
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/login'
     }
   ]
 })
 
-router.beforeEach((to, from, next) => {
-  console.log('Navigating to:', to.fullPath)
-  console.log('Matched routes:', to.matched)
-  next()
+router.beforeEach((to) => {
+  const userStore = useUserStore()
+  const studentStore = useStudentStore()
+  const studentInfo = studentStore.getUserInfo()
+  const token = userStore.token || studentInfo?.token
+  const currentRole = userStore.role || (studentInfo?.token ? 'student' : null)
+
+  if (to.path === '/login' && token && currentRole) {
+    return roleHome[currentRole] || '/login'
+  }
+
+  const authRecord = to.matched.find((record) => record.meta.requiresAuth)
+  if (!authRecord) {
+    return true
+  }
+
+  if (!token || !currentRole) {
+    return {
+      path: '/login',
+      query: { redirect: to.fullPath }
+    }
+  }
+
+  const expectedRole = authRecord.meta.role
+  if (expectedRole && expectedRole !== currentRole) {
+    return roleHome[currentRole] || '/login'
+  }
+
+  return true
 })
-
-// 全局前置守卫
-// router.beforeEach((to, from, next) => {
-//   // 假设有一个全局的用户状态
-//   const userRole = localStorage.getItem('userRole') // 从本地存储或其他地方获取用户角色
-
-//   // 根据用户角色跳转到对应页面
-//   if (!userRole) {
-//     // 如果没有用户角色，跳转到登录页
-//     next({ path: '/' })
-//   } else if (userRole === 'student') {
-//     // 如果是学生角色，跳转到学生端
-//     next({ path: '/student' })
-//   } else if (userRole === 'teacher') {
-//     // 如果是老师角色，跳转到老师端
-//     next({ path: '/teacher' })
-//   } else {
-//     // 如果角色未知，跳转到登录页
-//     next({ path: '/' })
-//   }
-// })
 
 export default router

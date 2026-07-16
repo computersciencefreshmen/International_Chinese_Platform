@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { createWebSocketUrl } from '@/config/runtime'
 
 export function useWebRTC() {
   const localStream = ref(null)
@@ -74,11 +75,13 @@ export function useWebRTC() {
 
   // 改造后的信令系统
   const initializeConnection = async (token) => {
+    if (!token || !String(token).trim()) return false
+
     try {
+      handleDisconnect()
+
       // 1. 建立带Token的WebSocket连接
-      socket.value = new WebSocket(
-        `ws://localhost:7788/websocket?token=${token}`
-      )
+      socket.value = new WebSocket(createWebSocketUrl(token))
 
       // 2. 获取当前房间信息
       // const roomRes = await fetch('/api/rooms/current', {
@@ -88,35 +91,49 @@ export function useWebRTC() {
 
       // 3. 初始化信令监听
       setupSignaling()
+      return true
     } catch (error) {
       console.error('初始化失败:', error)
+      return false
     }
   }
 
   const setupSignaling = () => {
-    socket.value.onmessage = async (event) => {
-      const message = JSON.parse(event.data)
+    const activeSocket = socket.value
+    if (!activeSocket) return
 
-      switch (message.type) {
-        case 'offer':
-          await handleOffer(message)
-          break
-        case 'answer':
-          await handleAnswer(message)
-          break
-        case 'candidate':
-          await handleCandidate(message)
-          break
-        case 'user-joined':
-          handlePeerJoined(message)
-          break
-        case 'user-left':
-          handlePeerLeft(message)
-          break
+    activeSocket.onmessage = async (event) => {
+      try {
+        const message = JSON.parse(event.data)
+
+        switch (message.type) {
+          case 'offer':
+            await handleOffer(message)
+            break
+          case 'answer':
+            await handleAnswer(message)
+            break
+          case 'candidate':
+            await handleCandidate(message)
+            break
+          case 'user-joined':
+            handlePeerJoined(message)
+            break
+          case 'user-left':
+            handlePeerLeft(message)
+            break
+        }
+      } catch (error) {
+        console.error('处理信令消息失败:', error)
       }
     }
 
-    socket.value.onclose = handleDisconnect
+    activeSocket.onclose = () => {
+      if (socket.value === activeSocket) {
+        socket.value = null
+      }
+      closePeerConnections()
+    }
   }
 
   // 处理新用户加入
@@ -215,12 +232,23 @@ export function useWebRTC() {
     }
   }
 
-  // 清理资源
-  const handleDisconnect = () => {
+  const closePeerConnections = () => {
     peerConnections.forEach((pc) => pc.close())
     peerConnections.clear()
     remoteStreams.value = []
-    socket.value?.close()
+  }
+
+  // 清理资源
+  const handleDisconnect = () => {
+    closePeerConnections()
+
+    const activeSocket = socket.value
+    socket.value = null
+
+    if (activeSocket && activeSocket.readyState < WebSocket.CLOSING) {
+      activeSocket.onclose = null
+      activeSocket.close()
+    }
   }
 
   onUnmounted(handleDisconnect)

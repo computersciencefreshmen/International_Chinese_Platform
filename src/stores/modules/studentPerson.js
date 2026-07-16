@@ -39,3 +39,27 @@ export const useStudentStore = defineStore(
     persist: true
   }
 )
+
+export const useStudentPersonStore = defineStore(
+  'student-person-store',
+  () => {
+    const appointmentList = ref([])
+
+    const addAppointment = (appointment) => {
+      appointmentList.value.push(appointment)
+    }
+
+    const clearAppointments = () => {
+      appointmentList.value = []
+    }
+
+    return {
+      appointmentList,
+      addAppointment,
+      clearAppointments
+    }
+  },
+  {
+    persist: true
+  }
+)

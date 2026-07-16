@@ -1,7 +1,10 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useStudentStore, useUserStore } from '@/stores'
 const router = useRouter()
+const studentStore = useStudentStore()
+const userStore = useUserStore()
 
 //引入模态框
 import CustomModal from '@/components/basic/CustomModal.vue'
@@ -71,8 +74,10 @@ const showModal = ref(false)
 
 //模态框确认事件
 const handleExit = () => {
-  console.log('退出')
-  router.push('/login')
+  userStore.clearSession()
+  studentStore.clearUserInfo()
+  showModal.value = false
+  router.replace('/login')
 }
 </script>
 <template>

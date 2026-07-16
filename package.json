@@ -1,14 +1,27 @@
 {
-  "name": "my-demo",
+  "name": "international-chinese-platform",
   "version": "0.0.0",
   "private": true,
+  "description": "A Vue 3 prototype for an international Chinese-language education platform.",
+  "packageManager": "pnpm@8.15.9",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/computersciencefreshmen/International_Chinese_Platform.git"
+  },
+  "homepage": "https://github.com/computersciencefreshmen/International_Chinese_Platform#readme",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix",
-    "format": "prettier --write src/"
+    "lint:check": "eslint .",
+    "format": "prettier --write src/",
+    "format:check": "prettier --check src/",
+    "check": "pnpm lint:check && pnpm format:check && pnpm build"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
