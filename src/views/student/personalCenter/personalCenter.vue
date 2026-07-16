@@ -1,5 +1,5 @@
 <script setup>
-import TabSwitch from '@/components/basic/TabSwitch.vue'
+import TabSwitch from '@/components/basic/tabSwitch.vue'
 // import { transitionName } from '@/router' // 从路由配置中导入 transitionName
 
 import { useStudentStore } from '@/stores'

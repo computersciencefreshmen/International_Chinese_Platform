@@ -169,8 +169,11 @@ const startCountdown = async () => {
           >{{ countdown }}s后重新获取</span
         >
       </div>
-      <transition name="fade" class="absolute inset-y-9 left-0 ml-6">
-        <p v-if="props.error" class="text-red-500 text-sm mt-2">
+      <transition name="fade">
+        <p
+          v-if="props.error"
+          class="absolute -bottom-5 left-6 text-red-500 text-sm"
+        >
           {{ props.error }}
         </p>
       </transition>

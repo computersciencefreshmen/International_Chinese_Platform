@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { FORUM_API_URL } from '@/config/runtime'
 
 //学生用户登录
 export const studentLogin = (email, password) => {
@@ -153,7 +154,7 @@ export const bookTeacher = (token, teacherId) => {
 //获取话论
 export const getForum = (words) => {
   return request({
-    url: 'http://10.173.40.205:5002/process_words',
+    url: FORUM_API_URL,
     method: 'POST',
     data: {
       words

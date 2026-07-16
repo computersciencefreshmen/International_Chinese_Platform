@@ -22,48 +22,6 @@ const getChatTurn = async (words) => {
   }
 }
 
-// const API_BASE_URL = 'http://192.168.0.217:5002'
-
-// const getChatTurn = async () => {
-//   try {
-//     // 方法1：推荐使用JSON body（更规范）
-//     const response = await fetch(`${API_BASE_URL}/process_words`, {
-//       method: 'POST',
-//       headers: {
-//         'Content-Type': 'application/json'
-//       },
-//       body: JSON.stringify({
-//         words: words.value // 直接传递数组
-//       })
-//     })
-
-//     // 方法2：如果必须用URL参数（需编码）
-//     // const encodedWords = encodeURIComponent(words.value.join(','));
-//     // const response = await fetch(
-//     //   `${API_BASE_URL}/process_words?words=${encodedWords}`,
-//     //   { method: 'POST' }
-//     // );
-
-//     if (!response.ok) {
-//       const errorData = await response.json().catch(() => ({}))
-//       throw new Error(errorData.message || `请求失败 (HTTP ${response.status})`)
-//     }
-
-//     const result = await response.json()
-
-//     if (result.code === 200) {
-//       console.log('获取的结果:', result.data)
-//       return result.data // 返回数据以便后续使用
-//     } else {
-//       throw new Error(result.message || '服务器返回数据格式异常')
-//     }
-//   } catch (error) {
-//     console.error('请求出错:', error)
-//     // 实际项目中应更新UI错误状态（如使用Vue的errorMessage.value）
-//     throw error // 重新抛出以便外部处理
-//   }
-// }
-
 const handleChatTurnSubmit = () => {
   // 提交关键词
   if (keyword1.value && keyword2.value && keyword3.value) {
