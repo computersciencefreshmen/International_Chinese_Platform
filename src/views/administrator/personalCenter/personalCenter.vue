@@ -1,5 +1,5 @@
 <script setup>
-import TabSwitch from '@/components/basic/TabSwitch.vue'
+import TabSwitch from '@/components/basic/tabSwitch.vue'
 import { useAdminStore } from '@/stores'
 
 const adminStore = useAdminStore()
