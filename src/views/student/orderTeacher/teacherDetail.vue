@@ -1,309 +1,639 @@
 <script setup>
-import { ref, onMounted, nextTick, onUnmounted } from 'vue' // 引入vue
-import MyButton from '@/components/basic/MyButton.vue'
-//引入路由
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import {
+  ArrowLeft,
+  Calendar,
+  Check,
+  Medal,
+  School,
+  Star
+} from '@element-plus/icons-vue'
+
+import { createAppointment, getTeacher, getTeachers } from '@/api/platform'
+
+const route = useRoute()
 const router = useRouter()
+const teacher = ref(null)
+const loading = ref(false)
+const loadError = ref('')
+const bookingVisible = ref(false)
+const submitting = ref(false)
 
-//定义容器盒子
-const container = ref(null)
+const tomorrowMorning = () => {
+  const date = new Date()
+  date.setDate(date.getDate() + 1)
+  date.setHours(10, 0, 0, 0)
+  return date
+}
 
-//容器距离顶部的距离
-const containerTop = ref(0)
+const form = reactive({
+  courseId: '',
+  topic: '',
+  message: '',
+  scheduledStart: tomorrowMorning(),
+  durationMinutes: 60
+})
 
-//定义布局架子
-const layout = ref(null)
+const teacherId = computed(() =>
+  typeof route.query.teacherId === 'string' ? route.query.teacherId : ''
+)
 
-// 动态计算容器的高度
-const handleContainerHeight = () => {
-  if (container.value && layout.value) {
-    // 容器距离顶部的高度
-    containerTop.value = container.value.offsetTop
-    // //获取布局架子的内边距
-    // const layoutPadding =
-    // 设置容器的高度
-    container.value.style.height = `${
-      window.innerHeight -
-      containerTop.value -
-      parseInt(window.getComputedStyle(layout.value).paddingBottom)
-    }px`
+const money = (cents) =>
+  cents ? `¥${(cents / 100).toFixed(0)}/课时` : '价格面议'
+
+const errorMessage = (error, fallback) =>
+  error?.response?.data?.msg || error?.message || fallback
+
+const loadTeacher = async () => {
+  loading.value = true
+  loadError.value = ''
+
+  try {
+    if (teacherId.value) {
+      teacher.value = await getTeacher(teacherId.value)
+    } else {
+      const result = await getTeachers({ page: 1, pageSize: 1 })
+      const firstTeacher = result?.items?.[0]
+      if (!firstTeacher) throw new Error('当前没有可预约教师')
+      teacher.value = await getTeacher(firstTeacher.id)
+    }
+    form.courseId = teacher.value.courses?.[0]?.id || ''
+  } catch (error) {
+    loadError.value = errorMessage(error, '教师资料加载失败')
+  } finally {
+    loading.value = false
   }
 }
 
-// 监听窗口大小变化
-const handleResize = () => {
-  handleContainerHeight()
+const openBooking = () => {
+  form.topic = teacher.value.courses?.[0]?.title || '一对一中文练习'
+  form.message = ''
+  form.scheduledStart = tomorrowMorning()
+  form.durationMinutes = 60
+  bookingVisible.value = true
 }
 
-onMounted(() => {
-  nextTick(() => {
-    // 初始计算容器高度
-    handleContainerHeight()
+const bookCourse = (course) => {
+  form.courseId = course.id
+  form.topic = course.title
+  form.scheduledStart = tomorrowMorning()
+  bookingVisible.value = true
+}
 
-    // 添加窗口大小变化的监听器
-    window.addEventListener('resize', handleResize)
-  })
-})
+const disabledDate = (date) => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const lastDay = new Date()
+  lastDay.setDate(lastDay.getDate() + 366)
+  return date < today || date > lastDay
+}
 
-onUnmounted(() => {
-  // 移除窗口大小变化的监听器
-  window.removeEventListener('resize', handleResize)
-})
-
-// 老师个人信息
-const teacherInfo = ref({
-  id: 2,
-  name: '老师名字',
-  score: 4.8,
-  //积分
-  integral: 200,
-  vip: false,
-  avatar: '@/assets/student/avatar.png',
-  graduate: '毕业于清华大学',
-  // 证书
-  certificate: ['教师资格证', '英语专业八级证书'],
-  // 擅长方向
-  direction: ['汉语口语', '商务英语'],
-  experience: '教学经验：5年',
-  // 教学风格
-  style: '风格：严谨、耐心',
-  isSubscribe: false
-})
-
-//定义历史记录标题
-const historyTitle = ref([
-  '话题',
-  '关键词',
-  '选择话轮',
-  '是否选择',
-  '预约日期和时段'
-])
-
-//定义历史记录
-const historyRecords = ref([
-  {
-    topic: '舌尖上的中国',
-    keywords: '美食、菜系、中国',
-    selectedRound: '话轮2',
-    appointmentTime: ''
-  },
-  {
-    topic: '中国的节日',
-    keywords: '春节、端午节、中秋节',
-    selectedRound: '话轮1',
-    appointmentTime: ''
-  },
-  {
-    topic: '中国的节日',
-    keywords: '春节、端午节、中秋节',
-    selectedRound: '话轮1',
-    appointmentTime: ''
-  },
-  {
-    topic: '中国的节日',
-    keywords: '春节、端午节、中秋节',
-    selectedRound: '话轮1',
-    appointmentTime: ''
-  },
-  {
-    topic: '中国的节日',
-    keywords: '春节、端午节、中秋节',
-    selectedRound: '话轮1',
-    appointmentTime: ''
-  },
-  {
-    topic: '中国的节日',
-    keywords: '春节、端午节、中秋节',
-    selectedRound: '话轮1',
-    appointmentTime: ''
+const submitBooking = async () => {
+  if (!form.topic.trim()) {
+    ElMessage.warning('请填写本次预约的学习主题')
+    return
   }
-])
 
-// 禁用当前时间之前的所有日期
-const disabledDate = (time) => {
-  return time.getTime() < Date.now() // 禁用当前时间之前的所有日期
+  const scheduledStart = new Date(form.scheduledStart)
+  if (
+    !Number.isFinite(scheduledStart.getTime()) ||
+    scheduledStart <= new Date()
+  ) {
+    ElMessage.warning('请选择晚于当前时间的预约时段')
+    return
+  }
+
+  submitting.value = true
+  try {
+    const appointment = await createAppointment({
+      teacherId: teacher.value.id,
+      courseId: form.courseId || null,
+      topic: form.topic.trim(),
+      message: form.message.trim(),
+      scheduledStart: scheduledStart.toISOString(),
+      durationMinutes: form.durationMinutes
+    })
+    bookingVisible.value = false
+    ElMessage.success('预约已提交，等待教师确认')
+    router.push({
+      name: 'studentHome',
+      query: { appointmentId: appointment.id }
+    })
+  } catch (error) {
+    ElMessage.error(errorMessage(error, '预约提交失败'))
+  } finally {
+    submitting.value = false
+  }
 }
+
+onMounted(loadTeacher)
 </script>
 
 <template>
-  <!-- 布局架子 -->
-  <div ref="layout" class="container bg-white mx-auto p-4">
-    <!-- 布局容器 -->
-    <div
-      ref="container"
-      class="bg-blue-50 rounded-lg p-4 flex flex-col relative"
+  <section class="detail-page">
+    <button
+      type="button"
+      class="back-button"
+      @click="router.push({ name: 'orderTeacher' })"
     >
-      <!-- 绝对定位的返回图标 -->
-      <img
-        class="h-6 w-6 cursor-pointer absolute top-4 left-4"
-        src="@/assets/student/back.png"
-        @click="router.go(-1)"
-        alt="返回图标"
-      />
-      <!-- 老师详情介绍 -->
-      <div class="flex items-center justify-end mb-4">
-        <div
-          class="bg-white relative rounded-lg flex items-center justify-end w-11/12 p-4"
-        >
-          <!-- 老师头像 -->
+      <el-icon><ArrowLeft /></el-icon>
+      返回教师列表
+    </button>
+
+    <el-skeleton v-if="loading" animated :rows="10" class="detail-shell" />
+
+    <el-result
+      v-else-if="loadError"
+      icon="error"
+      title="教师资料无法加载"
+      :sub-title="loadError"
+    >
+      <template #extra>
+        <el-button type="primary" @click="loadTeacher">重新加载</el-button>
+      </template>
+    </el-result>
+
+    <template v-else-if="teacher">
+      <header class="profile-hero">
+        <div class="profile-avatar">
           <img
-            class="h-32 w-32 rounded-full border-2 mr-4 shadow-lg absolute top-12 -left-16"
-            src="@/assets/student/avatar.png"
-            alt="老师头像"
+            v-if="teacher.avatarUrl"
+            :src="teacher.avatarUrl"
+            :alt="teacher.displayName"
           />
-          <div class="w-11/12 flex items-center">
-            <!-- 老师个人信息 -->
-            <div class="flex flex-col">
-              <!-- 老师名称和评级和金标 -->
-              <div class="flex items-center mb-2">
-                <p class="font-semibold text-lg ml-2">老师名字</p>
-                <p class="ml-2 text-sm text-gray-500">评级：4.8</p>
-                <img
-                  class="h-6 w-6 ml-1"
-                  src="@/assets/student/vip.png"
-                  alt="金标"
-                />
-              </div>
-              <!-- 老师简介 -->
-              <div class="flex flex-col">
-                <li class="text-gray-500 text-sm">
-                  {{ teacherInfo.graduate }}
-                </li>
-                <li class="text-gray-500 text-sm">
-                  {{ teacherInfo.certificate.join('、') }}
-                </li>
-                <li class="text-gray-500 text-sm">
-                  擅长{{ teacherInfo.direction.join('、') }}
-                </li>
-                <li class="text-gray-500 text-sm">
-                  {{ teacherInfo.experience }}
-                </li>
-                <li class="text-gray-500 text-sm">
-                  教学风格：{{ teacherInfo.style }}
-                </li>
-              </div>
-            </div>
-            <!-- 中间隔线 -->
-            <div class="w-0.5 h-48 bg-gray-300 mx-4"></div>
-            <!-- 右侧老师所拥有的课程展示 -->
-            <div class="flex-1 flex flex-row overflow-x-auto">
-              <!-- <p class="mb-2">该老师的网络课程</p> -->
-              <!-- 课程列表 -->
-              <div class="flex-1 flex flex-row space-x-4">
-                <!-- 课程 -->
-                <div
-                  class="w-48 border-2 rounded-lg overflow-hidden shadow-lg"
-                  v-for="i in 2"
-                  :key="i"
-                >
-                  <img
-                    class="w-full h-24 object-cover"
-                    src="@/assets/student/onlineCourses/春节.png"
-                    alt=""
-                  />
-                  <div class="p-2">
-                    <p class="font-semibold text-sm text-ellipsis">
-                      交通对话学习
-                    </p>
-                    <p
-                      class="line-clamp-3 text-xs text-gray-500 text-multiline-ellipsis"
-                    >
-                      当你来到中国，需要搭乘交通工具的时候应该如何表述呢？述呢？述呢？述呢？述呢？述呢？述呢？述呢？
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <span v-else>{{ teacher.displayName.slice(0, 1) }}</span>
+          <i v-if="teacher.verified"><Check /></i>
         </div>
-      </div>
-      <!-- 话轮选择 -->
-      <div class="bg-white p-4 rounded-lg flex-1 overflow-y-auto scrollBar">
-        <!-- 标题 -->
-        <div class="flex items-center justify-between mb-4 space-x-2">
-          <div class="flex items-center space-x-2">
-            <h1 class="font-semibold py-1 px-2 bg-blue-300 rounded-lg">
-              选择历史话题
-            </h1>
-            <h1
-              @click="router.push('createNewChat')"
-              class="font-semibold py-1 px-2 bg-yellow-300 rounded-lg cursor-pointer hover:bg-yellow-400 transition-all duration-300 ease-in-out"
+        <div class="profile-copy">
+          <div class="name-row">
+            <h1>{{ teacher.displayName }}</h1>
+            <el-tag v-if="teacher.verified" type="success" effect="dark" round>
+              平台认证
+            </el-tag>
+          </div>
+          <p>{{ teacher.title || '国际中文教师' }}</p>
+          <div class="school-row">
+            <span
+              ><el-icon><School /></el-icon
+              >{{ teacher.school || '独立教育者' }}</span
             >
-              生成新的话题
-            </h1>
+            <span
+              ><el-icon><Star /></el-icon
+              >{{ teacher.rating.toFixed(1) }} 评分</span
+            >
+            <span
+              ><el-icon><Medal /></el-icon
+              >{{ teacher.experienceYears }} 年经验</span
+            >
           </div>
-          <!-- 确认预约 -->
-          <MyButton type="primary" class="py-1 px-2 !bg-blue-300"
-            >确认预约</MyButton
-          >
         </div>
-        <!-- 网格布局列表 -->
-        <div class="flex-1">
-          <!-- 表格标题 -->
-          <div class="grid grid-cols-5 font-semibold text-center gap-4">
-            <span v-for="title in historyTitle" :key="title">{{ title }}</span>
-          </div>
-          <!-- 表格内容 -->
-          <div
-            v-for="(record, index) in historyRecords"
-            :key="index"
-            class="grid grid-cols-5 text-center cursor-pointer border-2 border-white border-dashed hover:border-blue-200 my-2 rounded-lg transition-all duration-300 ease-in-out py-2"
+        <aside class="booking-card">
+          <small>参考课时费</small>
+          <strong>{{ money(teacher.hourlyRateCents) }}</strong>
+          <span>预约申请由教师确认后生成课堂</span>
+          <el-button
+            type="primary"
+            size="large"
+            :icon="Calendar"
+            @click="openBooking"
           >
-            <span>{{ record.topic }}</span>
-            <span>{{ record.keywords }}</span>
-            <span>{{ record.selectedRound }}</span>
-            <!-- 是否选择 -->
-            <div class="flex items-center justify-center">
-              <MyButton type="primary" class="w-24">选择</MyButton>
+            发起预约
+          </el-button>
+        </aside>
+      </header>
+
+      <main class="content-grid">
+        <div class="main-column">
+          <section class="content-card">
+            <p class="section-label">ABOUT</p>
+            <h2>教师介绍</h2>
+            <p class="bio">{{ teacher.bio || '这位教师正在完善个人介绍。' }}</p>
+          </section>
+
+          <section class="content-card">
+            <p class="section-label">COURSES</p>
+            <h2>已通过审核的课程</h2>
+            <div v-if="teacher.courses.length" class="course-list">
+              <article v-for="course in teacher.courses" :key="course.id">
+                <div class="course-initial">{{ course.title.slice(0, 1) }}</div>
+                <div>
+                  <h3>{{ course.title }}</h3>
+                  <p>{{ course.summary }}</p>
+                  <small>
+                    {{ course.category }} · {{ course.durationMinutes }} 分钟 ·
+                    ¥{{ (course.priceCents / 100).toFixed(0) }}
+                  </small>
+                </div>
+                <el-button text type="primary" @click="bookCourse(course)">
+                  预约此课
+                </el-button>
+              </article>
             </div>
-            <!-- 预约时段 -->
-            <el-date-picker
-              v-model="record.appointmentTime"
-              type="datetime"
-              placeholder="请选择预约时间"
-              :disabled-date="disabledDate"
+            <el-empty
+              v-else
+              description="教师暂时没有已发布课程，仍可预约自定义主题"
             />
-          </div>
+          </section>
         </div>
-      </div>
-    </div>
-  </div>
+
+        <aside class="side-column">
+          <section class="content-card">
+            <p class="section-label">SPECIALTIES</p>
+            <h2>擅长方向</h2>
+            <div class="tag-cloud">
+              <el-tag
+                v-for="item in teacher.specialties"
+                :key="item"
+                effect="plain"
+                round
+              >
+                {{ item }}
+              </el-tag>
+              <span v-if="teacher.specialties.length === 0">综合中文教学</span>
+            </div>
+          </section>
+          <section class="content-card">
+            <p class="section-label">CERTIFICATES</p>
+            <h2>资质证书</h2>
+            <ul v-if="teacher.certificates.length">
+              <li v-for="item in teacher.certificates" :key="item">
+                <el-icon><Check /></el-icon>{{ item }}
+              </li>
+            </ul>
+            <p v-else class="muted">暂无公开证书信息</p>
+          </section>
+          <section class="content-card">
+            <p class="section-label">STYLE & LANGUAGES</p>
+            <h2>教学方式</h2>
+            <p class="muted">
+              {{ teacher.teachingStyle.join(' · ') || '因材施教' }}
+            </p>
+            <p class="muted">
+              授课语言：{{ teacher.languages.join('、') || '中文' }}
+            </p>
+          </section>
+        </aside>
+      </main>
+    </template>
+
+    <el-dialog
+      v-model="bookingVisible"
+      title="预约一对一中文课"
+      width="min(560px, 94vw)"
+    >
+      <el-form label-position="top">
+        <el-form-item label="关联课程（可选）">
+          <el-select
+            v-model="form.courseId"
+            clearable
+            placeholder="自定义主题，不关联课程"
+          >
+            <el-option
+              v-for="course in teacher?.courses || []"
+              :key="course.id"
+              :label="course.title"
+              :value="course.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="学习主题" required>
+          <el-input v-model="form.topic" maxlength="160" show-word-limit />
+        </el-form-item>
+        <div class="form-row">
+          <el-form-item label="预约时间" required>
+            <el-date-picker
+              v-model="form.scheduledStart"
+              type="datetime"
+              :disabled-date="disabledDate"
+              format="YYYY-MM-DD HH:mm"
+              placeholder="选择日期与时间"
+            />
+          </el-form-item>
+          <el-form-item label="课时长度">
+            <el-select v-model="form.durationMinutes">
+              <el-option label="30 分钟" :value="30" />
+              <el-option label="45 分钟" :value="45" />
+              <el-option label="60 分钟" :value="60" />
+              <el-option label="90 分钟" :value="90" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="给老师的留言">
+          <el-input
+            v-model="form.message"
+            type="textarea"
+            :rows="4"
+            maxlength="2000"
+            show-word-limit
+            placeholder="例如：希望重点练习发音，并准备一次面试自我介绍。"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bookingVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitBooking">
+          提交预约
+        </el-button>
+      </template>
+    </el-dialog>
+  </section>
 </template>
 
 <style scoped>
-/* 自定义滚动条样式 */
-.scrollBar::-webkit-scrollbar {
-  width: 6px; /* 滚动条的宽度 */
-}
-.scrollBar::-webkit-scrollbar-track {
-  background: #f1f1f1; /* 滚动条轨道的背景颜色 */
-  border-radius: 10px; /* 滚动条轨道的圆角 */
+.detail-page {
+  min-height: calc(100vh - 120px);
+  padding: 24px 30px 40px;
+  color: #193753;
+  background: #f7fafc;
 }
 
-.scrollBar::-webkit-scrollbar-thumb {
-  background: #888; /* 滚动条的背景颜色 */
-  border-radius: 10px; /* 滚动条的圆角 */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 18px;
+  padding: 8px 0;
+  border: 0;
+  color: #34799c;
+  background: transparent;
+  cursor: pointer;
 }
 
-.scrollBar::-webkit-scrollbar-thumb:hover {
-  background: #6e6d6d; /* 滚动条悬停时的背景颜色 */
+.detail-shell,
+.profile-hero,
+.content-card {
+  border: 1px solid #e1ebf0;
+  border-radius: 22px;
+  background: white;
+  box-shadow: 0 13px 35px rgba(39, 75, 99, 0.07);
 }
 
-/* 单行隐藏 */
-.text-ellipsis {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  width: 100%; /* 或者设置一个固定宽度 */
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 30px;
+  background:
+    radial-gradient(
+      circle at 80% 20%,
+      rgba(104, 199, 192, 0.18),
+      transparent 28%
+    ),
+    white;
 }
 
-/* 多行隐藏*/
-.text-multiline-ellipsis {
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2; /* 设置最大显示行数 */
-  line-clamp: 2; /* 设置最大显示行数 */
-  -webkit-box-orient: vertical;
-  width: 100%; /* 或者设置一个固定宽度 */
+.profile-avatar {
+  position: relative;
+  display: grid;
+  width: 112px;
+  height: 112px;
+  flex: none;
+  border-radius: 32px;
+  color: white;
+  font-size: 40px;
+  font-weight: 800;
+  place-items: center;
+  background: linear-gradient(145deg, #237ca6, #6bc5bd);
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.profile-avatar i {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  border: 4px solid white;
+  border-radius: 50%;
+  place-items: center;
+  background: #27a66f;
+}
+
+.profile-avatar svg {
+  width: 17px;
+}
+
+.profile-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.name-row,
+.school-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.name-row h1 {
+  margin: 0;
+  font-size: 34px;
+}
+
+.profile-copy > p {
+  margin: 6px 0 14px;
+  color: #668093;
+  font-size: 18px;
+}
+
+.school-row {
+  gap: 16px;
+  color: #718797;
+  font-size: 13px;
+}
+
+.school-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.booking-card {
+  display: flex;
+  width: 220px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border-radius: 18px;
+  background: #eff7fa;
+}
+
+.booking-card small,
+.booking-card span {
+  color: #6f8798;
+}
+
+.booking-card strong {
+  color: #d6743a;
+  font-size: 26px;
+}
+
+.booking-card span {
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.8fr);
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.main-column,
+.side-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.content-card {
+  padding: 24px;
+}
+
+.section-label {
+  margin: 0 0 5px;
+  color: #3383a6;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.content-card h2 {
+  margin: 0 0 15px;
+  font-size: 20px;
+}
+
+.bio,
+.muted {
+  color: #667e90;
+  line-height: 1.8;
+}
+
+.course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.course-list article {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  gap: 13px;
+  padding: 14px;
+  border: 1px solid #e5edf2;
+  border-radius: 15px;
+}
+
+.course-initial {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+  color: white;
+  font-weight: 800;
+  place-items: center;
+  background: linear-gradient(140deg, #2683aa, #67c0ba);
+}
+
+.course-list h3,
+.course-list p {
+  margin: 0;
+}
+
+.course-list p {
+  margin-top: 4px;
+  color: #6c8292;
+  font-size: 13px;
+}
+
+.course-list small {
+  display: block;
+  margin-top: 7px;
+  color: #8a9aa6;
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.content-card ul {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.content-card li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #5d778a;
+}
+
+.content-card li .el-icon {
+  color: #27a66f;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 160px;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .profile-hero {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .booking-card {
+    width: 100%;
+  }
+
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .detail-page {
+    padding: 15px;
+  }
+
+  .profile-hero {
+    padding: 20px;
+  }
+
+  .profile-avatar {
+    width: 82px;
+    height: 82px;
+    border-radius: 24px;
+  }
+
+  .name-row h1 {
+    font-size: 26px;
+  }
+
+  .course-list article,
+  .form-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
