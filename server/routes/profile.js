@@ -19,6 +19,22 @@ const avatarUrlSchema = z
     '头像地址格式不正确'
   )
 
+const teacherProfileSchema = z
+  .object({
+    school: z.string().trim().max(160).optional(),
+    title: z.string().trim().max(120).optional(),
+    experienceYears: z.coerce.number().int().min(0).max(80).optional(),
+    hourlyRateCents: z.coerce.number().int().min(0).max(10_000_000).optional(),
+    specialties: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+    certificates: z.array(z.string().trim().min(1).max(160)).max(20).optional(),
+    teachingStyle: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+    languages: z.array(z.string().trim().min(1).max(80)).max(20).optional()
+  })
+  .strict()
+  .refine((value) => Object.values(value).some((item) => item !== undefined), {
+    message: '至少需要提供一个教师资料字段'
+  })
+
 const profileSchema = z
   .object({
     displayName: z.string().trim().min(1, '昵称不能为空').max(80).optional(),
@@ -30,7 +46,8 @@ const profileSchema = z
       .enum(['beginner', 'HSK1', 'HSK2', 'HSK3', 'HSK4', 'HSK5', 'HSK6'])
       .nullable()
       .optional(),
-    bio: z.string().trim().max(500).optional()
+    bio: z.string().trim().max(500).optional(),
+    teacherProfile: teacherProfileSchema.optional()
   })
   .refine((value) => Object.values(value).some((item) => item !== undefined), {
     message: '至少需要提供一个可修改字段'
@@ -64,6 +81,58 @@ const profileColumnMap = {
   age: 'age',
   chineseLevel: 'chinese_level',
   bio: 'bio'
+}
+
+const teacherProfileColumnMap = {
+  school: 'school',
+  title: 'title',
+  experienceYears: 'experience_years',
+  hourlyRateCents: 'hourly_rate_cents',
+  specialties: 'specialties_json',
+  certificates: 'certificates_json',
+  teachingStyle: 'teaching_style_json',
+  languages: 'languages_json'
+}
+
+const teacherProfileJsonFields = new Set([
+  'specialties',
+  'certificates',
+  'teachingStyle',
+  'languages'
+])
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function teacherProfileData(row) {
+  if (!row) return null
+  return {
+    school: row.school,
+    title: row.title,
+    experienceYears: Number(row.experience_years),
+    rating: Number(row.rating),
+    hourlyRateCents: Number(row.hourly_rate_cents),
+    specialties: parseJsonArray(row.specialties_json),
+    certificates: parseJsonArray(row.certificates_json),
+    teachingStyle: parseJsonArray(row.teaching_style_json),
+    languages: parseJsonArray(row.languages_json),
+    verifiedAt: row.verified_at ?? null
+  }
+}
+
+function profileData(db, user) {
+  const profile = publicUser(user)
+  if (profile.role !== 'teacher') return profile
+  const teacherProfile = db
+    .prepare('SELECT * FROM teacher_profiles WHERE user_id = ? LIMIT 1')
+    .get(profile.id)
+  return { ...profile, teacherProfile: teacherProfileData(teacherProfile) }
 }
 
 function responseData(reply, data, message = '操作成功') {
@@ -115,7 +184,12 @@ export async function profileRoutes(app) {
   app.get(
     '/api/v1/me',
     { preHandler: app.authenticate },
-    async (request, reply) => responseData(reply, request.auth.user)
+    async (request, reply) => {
+      const user = db
+        .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
+        .get(request.auth.user.id)
+      return responseData(reply, profileData(db, user))
+    }
   )
 
   app.patch(
@@ -134,6 +208,10 @@ export async function profileRoutes(app) {
         return validationError(reply, result)
       }
 
+      if (result.data.teacherProfile && request.auth.user.role !== 'teacher') {
+        return responseError(reply, 403, '只有教师账号可以修改教师资料')
+      }
+
       const assignments = []
       const values = []
 
@@ -148,15 +226,47 @@ export async function profileRoutes(app) {
       assignments.push('updated_at = ?')
       values.push(updatedAt, request.auth.user.id)
 
-      db.prepare(`UPDATE users SET ${assignments.join(', ')} WHERE id = ?`).run(
-        ...values
-      )
+      const updateProfile = db.transaction(() => {
+        db.prepare(
+          `UPDATE users SET ${assignments.join(', ')} WHERE id = ?`
+        ).run(...values)
+
+        if (result.data.teacherProfile) {
+          db.prepare(
+            `INSERT INTO teacher_profiles (user_id, created_at, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(user_id) DO NOTHING`
+          ).run(request.auth.user.id, updatedAt, updatedAt)
+
+          const teacherAssignments = []
+          const teacherValues = []
+          for (const [field, column] of Object.entries(
+            teacherProfileColumnMap
+          )) {
+            if (result.data.teacherProfile[field] !== undefined) {
+              teacherAssignments.push(`${column} = ?`)
+              teacherValues.push(
+                teacherProfileJsonFields.has(field)
+                  ? JSON.stringify(result.data.teacherProfile[field])
+                  : result.data.teacherProfile[field]
+              )
+            }
+          }
+          teacherAssignments.push('updated_at = ?')
+          teacherValues.push(updatedAt, request.auth.user.id)
+          db.prepare(
+            `UPDATE teacher_profiles
+             SET ${teacherAssignments.join(', ')} WHERE user_id = ?`
+          ).run(...teacherValues)
+        }
+      })
+      updateProfile()
 
       const user = db
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(request.auth.user.id)
 
-      return responseData(reply, publicUser(user), '个人资料已更新')
+      return responseData(reply, profileData(db, user), '个人资料已更新')
     }
   )
 
@@ -241,7 +351,7 @@ export async function profileRoutes(app) {
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(user.id)
 
-      return responseData(reply, publicUser(updatedUser), '密码已更新')
+      return responseData(reply, profileData(db, updatedUser), '密码已更新')
     }
   )
 }
