@@ -14,6 +14,7 @@ import {
 
 const requiredTables = [
   'users',
+  'teacher_profiles',
   'sessions',
   'verification_codes',
   'courses',
@@ -25,7 +26,10 @@ const requiredTables = [
   'submissions',
   'chat_messages',
   'notifications',
-  'audit_logs'
+  'audit_logs',
+  'files',
+  'dialogue_sessions',
+  'dialogue_turns'
 ]
 
 function createTemporaryDatabase(t, options = {}) {

@@ -246,6 +246,34 @@ function insertCourses(database, userIds) {
     )
 }
 
+function insertTeacherProfile(database, userIds) {
+  database
+    .prepare(
+      `
+      INSERT OR IGNORE INTO teacher_profiles (
+        user_id, school, title, experience_years, rating, hourly_rate_cents,
+        specialties_json, certificates_json, teaching_style_json,
+        languages_json, verified_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    )
+    .run(
+      userIds.teacher,
+      '北京语言大学',
+      '国际中文教育讲师',
+      8,
+      4.9,
+      18800,
+      JSON.stringify(['生活口语', 'HSK 备考', '中国文化']),
+      JSON.stringify(['国际中文教师证书', '普通话一级乙等']),
+      JSON.stringify(['耐心引导', '情景教学', '即时反馈']),
+      JSON.stringify(['中文', '英语']),
+      '2026-03-15T08:00:00.000Z',
+      '2026-03-15T08:00:00.000Z',
+      '2026-07-01T00:00:00.000Z'
+    )
+}
+
 function insertAppointments(database, userIds) {
   const insert = database.prepare(`
     INSERT OR IGNORE INTO appointments (
@@ -475,6 +503,7 @@ export function seedDatabase(database) {
 
   const seed = database.transaction(() => {
     const userIds = insertUsers(database)
+    insertTeacherProfile(database, userIds)
     insertCourses(database, userIds)
     insertAppointments(database, userIds)
     insertAssignments(database, userIds)

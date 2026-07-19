@@ -32,6 +32,7 @@ async function createAuthTestApp(t) {
 
   await app.register(cookie)
   await authPlugin(app, {
+    appOrigin: 'http://localhost:5173',
     db,
     secureCookies: false,
     sessionTtlSeconds: 3600
@@ -55,14 +56,25 @@ async function createAuthTestApp(t) {
 }
 
 async function register(app, overrides = {}) {
+  const email = overrides.email ?? 'student@example.com'
+  const role = overrides.role ?? 'student'
+  const codeResponse = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verification-code',
+    payload: { email, role }
+  })
+  assert.equal(codeResponse.statusCode, 200)
+  const verificationCode = readBody(codeResponse).data.developmentCode
+
   return app.inject({
     method: 'POST',
     url: '/api/v1/auth/register',
     payload: {
-      email: 'student@example.com',
+      email,
       password: 'Secure123!',
-      role: 'student',
+      role,
       displayName: '测试学生',
+      verificationCode,
       ...overrides
     }
   })
@@ -114,13 +126,26 @@ test('register rejects duplicate accounts and administrator self-registration', 
   const first = await register(app)
   assert.equal(first.statusCode, 201)
 
-  const duplicate = await register(app)
+  const duplicate = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    payload: {
+      email: 'student@example.com',
+      password: 'Secure123!',
+      role: 'student',
+      verificationCode: '000000'
+    }
+  })
   assert.equal(duplicate.statusCode, 409)
   assert.equal(readBody(duplicate).code, 409)
 
-  const administrator = await register(app, {
-    email: 'admin-signup@example.com',
-    role: 'administrator'
+  const administrator = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verification-code',
+    payload: {
+      email: 'admin-signup@example.com',
+      role: 'administrator'
+    }
   })
   assert.equal(administrator.statusCode, 400)
 })
@@ -324,4 +349,22 @@ test('logout revokes the session and bearer authentication remains API-compatibl
   assert.equal(bearerResponse.statusCode, 200)
   assert.equal(readBody(bearerResponse).data.id, user.id)
   assert.equal(Object.hasOwn(readBody(bearerResponse).data, 'token'), false)
+})
+
+test('cookie-authenticated writes reject an untrusted Origin', async (t) => {
+  const { app } = await createAuthTestApp(t)
+  const registration = await register(app)
+
+  const response = await app.inject({
+    method: 'PATCH',
+    url: '/api/v1/me',
+    headers: {
+      cookie: cookieHeader(registration),
+      origin: 'https://attacker.example'
+    },
+    payload: { displayName: '不应被写入' }
+  })
+
+  assert.equal(response.statusCode, 403)
+  assert.equal(readBody(response).msg, '请求来源不受信任')
 })

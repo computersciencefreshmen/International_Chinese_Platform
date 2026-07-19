@@ -24,12 +24,25 @@ export async function authPlugin(app, options = {}) {
   const allowBearer = options.allowBearer !== false
   const sessionTtlSeconds =
     Number(options.sessionTtlSeconds) || DEFAULT_SESSION_TTL_SECONDS
+  const appOrigin = options.appOrigin ?? app.config?.appOrigin ?? null
   const secureCookies =
     options.secureCookies ?? process.env.NODE_ENV === 'production'
 
   if (!app.hasRequestDecorator('auth')) {
     app.decorateRequest('auth', null)
   }
+
+  app.addHook('preHandler', async (request, reply) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+      return
+    }
+
+    const hasSessionCookie = Boolean(request.cookies?.[SESSION_COOKIE_NAME])
+    const origin = request.headers.origin
+    if (hasSessionCookie && origin && appOrigin && origin !== appOrigin) {
+      return sendError(reply, 403, '请求来源不受信任')
+    }
+  })
 
   const authenticate = async (request, reply) => {
     const credential = extractSessionToken(request, { allowBearer })

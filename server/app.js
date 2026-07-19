@@ -12,8 +12,12 @@ import Fastify from 'fastify'
 import { defaultConfig, loadConfig } from './config.js'
 import { errorDescriptor, sendFailure, sendSuccess } from './lib/http.js'
 import authPlugin from './plugins/auth.js'
+import adminRoutes from './routes/admin.js'
 import authRoutes from './routes/auth.js'
+import appointmentRoutes from './routes/appointments.js'
+import courseRoutes from './routes/courses.js'
 import profileRoutes from './routes/profile.js'
+import teacherRoutes from './routes/teachers.js'
 
 function resolveConfig(overrides = {}) {
   const nodeEnv = overrides.nodeEnv || defaultConfig.nodeEnv
@@ -87,11 +91,16 @@ export async function buildApp({
     await authPlugin(app, {
       db: database,
       allowBearer: config.allowBearer,
+      appOrigin: config.appOrigin,
       secureCookies: config.secureCookies,
       sessionTtlSeconds: config.sessionTtlSeconds
     })
     await app.register(authRoutes)
     await app.register(profileRoutes)
+    await app.register(courseRoutes)
+    await app.register(adminRoutes)
+    await app.register(teacherRoutes)
+    await app.register(appointmentRoutes)
   }
 
   app.get('/api/v1/health', async (_request, reply) =>

@@ -16,6 +16,22 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS teacher_profiles (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  school TEXT NOT NULL DEFAULT '' CHECK (length(school) <= 160),
+  title TEXT NOT NULL DEFAULT '' CHECK (length(title) <= 120),
+  experience_years INTEGER NOT NULL DEFAULT 0 CHECK (experience_years BETWEEN 0 AND 80),
+  rating REAL NOT NULL DEFAULT 5 CHECK (rating BETWEEN 0 AND 5),
+  hourly_rate_cents INTEGER NOT NULL DEFAULT 0 CHECK (hourly_rate_cents >= 0),
+  specialties_json TEXT NOT NULL DEFAULT '[]',
+  certificates_json TEXT NOT NULL DEFAULT '[]',
+  teaching_style_json TEXT NOT NULL DEFAULT '[]',
+  languages_json TEXT NOT NULL DEFAULT '[]',
+  verified_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -201,8 +217,43 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS files (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  storage_key TEXT NOT NULL UNIQUE CHECK (length(storage_key) BETWEEN 1 AND 255),
+  original_name TEXT NOT NULL CHECK (length(original_name) BETWEEN 1 AND 255),
+  mime_type TEXT NOT NULL CHECK (length(mime_type) BETWEEN 1 AND 120),
+  size_bytes INTEGER NOT NULL CHECK (size_bytes BETWEEN 1 AND 52428800),
+  sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+  category TEXT NOT NULL CHECK (category IN ('avatar', 'course_cover', 'course_video', 'course_material')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS dialogue_sessions (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 160),
+  keywords_json TEXT NOT NULL DEFAULT '[]',
+  provider TEXT NOT NULL DEFAULT 'local',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS dialogue_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES dialogue_sessions(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  position INTEGER NOT NULL CHECK (position > 0),
+  speaker TEXT NOT NULL CHECK (speaker IN ('student', 'tutor', 'system')),
+  content TEXT NOT NULL CHECK (length(trim(content)) BETWEEN 1 AND 4000),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (session_id, position)
+);
+
 CREATE INDEX IF NOT EXISTS users_role_status_idx
   ON users (role, status);
+
+CREATE INDEX IF NOT EXISTS teacher_profiles_discovery_idx
+  ON teacher_profiles (rating DESC, experience_years DESC);
 
 CREATE INDEX IF NOT EXISTS sessions_user_active_idx
   ON sessions (user_id, expires_at)
@@ -272,3 +323,9 @@ CREATE INDEX IF NOT EXISTS audit_logs_actor_created_idx
 
 CREATE INDEX IF NOT EXISTS audit_logs_entity_idx
   ON audit_logs (entity_type, entity_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS files_owner_category_idx
+  ON files (owner_id, category, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS dialogue_sessions_student_idx
+  ON dialogue_sessions (student_id, updated_at DESC);

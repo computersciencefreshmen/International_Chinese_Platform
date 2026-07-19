@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
+import { Buffer } from 'node:buffer'
 
 import { z } from 'zod'
 
@@ -50,7 +51,22 @@ const registerSchema = z.object({
     .nullable()
     .optional(),
   bio: z.string().trim().max(500).optional(),
-  verificationCode: z.string().trim().max(20).optional()
+  school: z.string().trim().max(160).optional(),
+  title: z.string().trim().max(120).optional(),
+  experienceYears: z.coerce.number().int().min(0).max(80).optional(),
+  specialties: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+  certificates: z.array(z.string().trim().min(1).max(160)).max(20).optional(),
+  teachingStyle: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+  languages: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+  verificationCode: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, '请输入 6 位验证码')
+})
+
+const verificationRequestSchema = z.object({
+  email: emailSchema,
+  role: publicRegistrationRoleSchema.default('student')
 })
 
 const dummyPasswordHashPromise = hashPassword('invalid-password-123456')
@@ -95,11 +111,104 @@ function sessionMetadata(request) {
   }
 }
 
+function verificationDigest(secret, email, code) {
+  return createHmac('sha256', secret)
+    .update(`${email}:${code}`, 'utf8')
+    .digest('hex')
+}
+
+function safeDigestEqual(left, right) {
+  try {
+    const leftBuffer = Buffer.from(left, 'hex')
+    const rightBuffer = Buffer.from(right, 'hex')
+    return (
+      leftBuffer.length === rightBuffer.length &&
+      timingSafeEqual(leftBuffer, rightBuffer)
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function authRoutes(app) {
   const db = app.db
   if (!db) {
     throw new Error('authRoutes requires app.db')
   }
+
+  const isProduction = app.config?.isProduction === true
+  const verificationSecret =
+    app.config?.verificationCodeSecret || 'local-development-only-secret'
+
+  app.post(
+    '/api/v1/auth/verification-code',
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: '10 minutes'
+        }
+      }
+    },
+    async (request, reply) => {
+      const result = verificationRequestSchema.safeParse(
+        unwrapBody(request.body)
+      )
+      if (!result.success) {
+        return validationError(reply, result)
+      }
+
+      if (
+        isProduction &&
+        (!app.config?.verificationCodeSecret || !app.config?.smtpUrl)
+      ) {
+        return responseError(reply, 503, '注册邮件服务尚未配置')
+      }
+
+      const { email } = result.data
+      const existingUser = db
+        .prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE LIMIT 1')
+        .get(email)
+      if (existingUser) {
+        return responseError(reply, 409, '该邮箱已注册')
+      }
+
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
+      const now = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+      const id = randomUUID()
+
+      const replaceCode = db.transaction(() => {
+        db.prepare(
+          `UPDATE verification_codes
+          SET consumed_at = ?
+          WHERE email = ? COLLATE NOCASE
+            AND purpose = 'register'
+            AND consumed_at IS NULL`
+        ).run(now, email)
+        db.prepare(
+          `INSERT INTO verification_codes (
+            id, email, purpose, code_hash, expires_at, created_at
+          ) VALUES (?, ?, 'register', ?, ?, ?)`
+        ).run(
+          id,
+          email,
+          verificationDigest(verificationSecret, email, code),
+          expiresAt,
+          now
+        )
+      })
+      replaceCode()
+
+      // A production MailProvider will deliver the code. Local development
+      // intentionally exposes it so the repository remains self-contained.
+      return responseData(
+        reply,
+        isProduction ? { expiresAt } : { expiresAt, developmentCode: code },
+        '验证码已发送'
+      )
+    }
+  )
 
   app.post(
     '/api/v1/auth/register',
@@ -129,6 +238,39 @@ export async function authRoutes(app) {
 
       if (existingUser) {
         return responseError(reply, 409, '该邮箱已注册')
+      }
+
+      const verification = db
+        .prepare(
+          `SELECT id, code_hash, expires_at, attempts
+          FROM verification_codes
+          WHERE email = ? COLLATE NOCASE
+            AND purpose = 'register'
+            AND consumed_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT 1`
+        )
+        .get(input.email)
+      const providedDigest = verificationDigest(
+        verificationSecret,
+        input.email,
+        input.verificationCode
+      )
+      const verificationValid =
+        verification &&
+        verification.expires_at > new Date().toISOString() &&
+        verification.attempts < 10 &&
+        safeDigestEqual(providedDigest, verification.code_hash)
+
+      if (!verificationValid) {
+        if (verification) {
+          db.prepare(
+            `UPDATE verification_codes
+            SET attempts = MIN(attempts + 1, 10)
+            WHERE id = ?`
+          ).run(verification.id)
+        }
+        return responseError(reply, 400, '验证码无效或已过期')
       }
 
       const userId = randomUUID()
@@ -171,6 +313,38 @@ export async function authRoutes(app) {
             createdAt
           )
 
+          if (input.role === 'teacher') {
+            db.prepare(
+              `INSERT INTO teacher_profiles (
+                user_id, school, title, experience_years,
+                specialties_json, certificates_json, teaching_style_json,
+                languages_json, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).run(
+              userId,
+              input.school ?? '',
+              input.title ?? '国际中文教师',
+              input.experienceYears ?? 0,
+              JSON.stringify(input.specialties ?? []),
+              JSON.stringify(input.certificates ?? []),
+              JSON.stringify(input.teachingStyle ?? []),
+              JSON.stringify(input.languages ?? ['中文']),
+              createdAt,
+              createdAt
+            )
+          }
+
+          const consumeResult = db
+            .prepare(
+              `UPDATE verification_codes
+              SET consumed_at = ?
+              WHERE id = ? AND consumed_at IS NULL`
+            )
+            .run(createdAt, verification.id)
+          if (consumeResult.changes !== 1) {
+            throw new Error('VERIFICATION_CODE_ALREADY_USED')
+          }
+
           return createSession(db, userId, {
             ttlSeconds: app.sessionTtlSeconds,
             ...sessionMetadata(request)
@@ -179,6 +353,9 @@ export async function authRoutes(app) {
 
         session = createUserAndSession()
       } catch (error) {
+        if (error?.message === 'VERIFICATION_CODE_ALREADY_USED') {
+          return responseError(reply, 409, '验证码已被使用，请重新获取')
+        }
         if (
           error?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
           error?.code === 'SQLITE_CONSTRAINT'

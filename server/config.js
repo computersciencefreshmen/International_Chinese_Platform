@@ -57,6 +57,7 @@ export function loadConfig(env = process.env) {
     rateLimitWindow: env.RATE_LIMIT_WINDOW || '1 minute',
     sessionTtlHours,
     sessionTtlSeconds: sessionTtlHours * 60 * 60,
+    verificationCodeSecret: env.VERIFICATION_CODE_SECRET || '',
     secureCookies: boolean(env.SECURE_COOKIES, nodeEnv === 'production'),
     allowBearer: boolean(env.ALLOW_BEARER_AUTH, true),
     trustProxy: boolean(env.TRUST_PROXY, false),
