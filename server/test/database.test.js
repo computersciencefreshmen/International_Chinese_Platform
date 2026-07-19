@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createDatabase, migrateDatabase } from '../db/database.js'
+import Database from 'better-sqlite3'
+
+import {
+  createDatabase,
+  MIGRATION_IDS,
+  migrateDatabase
+} from '../db/database.js'
 import {
   DEMO_ACCOUNTS,
   DEMO_PASSWORD,
@@ -66,21 +72,176 @@ test('database migration creates the complete schema with safe pragmas', (t) => 
     assert.ok(tables.has(table), `expected migration to create ${table}`)
   }
 
-  assert.equal(
+  assert.deepEqual(
     database
-      .prepare(
-        "SELECT COUNT(*) AS count FROM schema_migrations WHERE id = '001_initial_schema'"
-      )
-      .get().count,
-    1
+      .prepare('SELECT id FROM schema_migrations ORDER BY id')
+      .all()
+      .map((row) => row.id),
+    [...MIGRATION_IDS]
   )
 
   migrateDatabase(database)
   assert.equal(
     database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()
       .count,
-    1,
+    MIGRATION_IDS.length,
     'migrations should be repeatable'
+  )
+})
+
+test('legacy database upgrades in order without losing classroom messages', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'international-chinese-legacy-'))
+  const filename = join(directory, 'legacy.db')
+  const legacy = new Database(filename)
+  legacy.pragma('foreign_keys = ON')
+  legacy.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      avatar_url TEXT,
+      country TEXT,
+      region TEXT,
+      age INTEGER,
+      chinese_level TEXT,
+      bio TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE appointments (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES users(id),
+      teacher_id TEXT NOT NULL REFERENCES users(id),
+      course_id TEXT,
+      scheduled_start TEXT NOT NULL,
+      scheduled_end TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      response_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE classrooms (
+      id TEXT PRIMARY KEY,
+      appointment_id TEXT NOT NULL UNIQUE REFERENCES appointments(id),
+      room_code TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'scheduled',
+      opened_at TEXT,
+      closed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE chat_messages (
+      id TEXT PRIMARY KEY,
+      classroom_id TEXT NOT NULL REFERENCES classrooms(id),
+      sender_id TEXT REFERENCES users(id),
+      message_type TEXT NOT NULL DEFAULT 'text',
+      content TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      edited_at TEXT,
+      deleted_at TEXT
+    );
+  `)
+
+  const now = '2025-01-01T00:00:00.000Z'
+  const studentId = '10000000-0000-4000-8000-000000000001'
+  const teacherId = '10000000-0000-4000-8000-000000000002'
+  legacy
+    .prepare(
+      `INSERT INTO users (
+        id, email, password_hash, role, display_name, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      studentId,
+      'legacy@student.test',
+      'x'.repeat(64),
+      'student',
+      '旧学生',
+      now,
+      now
+    )
+  legacy
+    .prepare(
+      `INSERT INTO users (
+        id, email, password_hash, role, display_name, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      teacherId,
+      'legacy@teacher.test',
+      'x'.repeat(64),
+      'teacher',
+      '旧教师',
+      now,
+      now
+    )
+  legacy
+    .prepare(
+      `INSERT INTO appointments (
+        id, student_id, teacher_id, scheduled_start, scheduled_end, topic,
+        status, created_at, updated_at
+      ) VALUES ('20000000-0000-4000-8000-000000000001', ?, ?, ?, ?, '旧课堂',
+        'accepted', ?, ?)`
+    )
+    .run(studentId, teacherId, now, '2025-01-01T01:00:00.000Z', now, now)
+  legacy.exec(`
+    INSERT INTO classrooms (
+      id, appointment_id, room_code, status, created_at, updated_at
+    ) VALUES (
+      '30000000-0000-4000-8000-000000000001',
+      '20000000-0000-4000-8000-000000000001',
+      'legacy-room', 'open', '${now}', '${now}'
+    );
+    INSERT INTO chat_messages (
+      id, classroom_id, sender_id, content, created_at
+    ) VALUES (
+      '40000000-0000-4000-8000-000000000001',
+      '30000000-0000-4000-8000-000000000001',
+      '${studentId}', '迁移前的课堂消息', '${now}'
+    );
+  `)
+  legacy.close()
+
+  const upgraded = createDatabase({ filename })
+  t.after(() => {
+    if (upgraded.open) upgraded.close()
+    rmSync(directory, { recursive: true, force: true })
+  })
+
+  assert.equal(
+    upgraded
+      .prepare('SELECT content FROM chat_messages WHERE id = ?')
+      .get('40000000-0000-4000-8000-000000000001').content,
+    '迁移前的课堂消息'
+  )
+  assert.ok(
+    upgraded
+      .prepare('PRAGMA table_info(chat_messages)')
+      .all()
+      .some((column) => column.name === 'client_message_id')
+  )
+  for (const table of ['teacher_profiles', 'files', 'dialogue_sessions']) {
+    assert.ok(
+      upgraded
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+        )
+        .get(table),
+      `expected legacy migration to create ${table}`
+    )
+  }
+  assert.deepEqual(
+    upgraded
+      .prepare('SELECT id FROM schema_migrations ORDER BY id')
+      .all()
+      .map((row) => row.id),
+    [...MIGRATION_IDS]
   )
 })
 
