@@ -193,6 +193,10 @@ function scoresEqual(left, right) {
   return Math.abs(Number(left) - Number(right)) < 0.001
 }
 
+function deadlinePassed(dueAt, now = Date.now()) {
+  return dueAt !== null && Date.parse(dueAt) <= now
+}
+
 function responseData(reply, data, message = '操作成功', statusCode = 200) {
   return reply.code(statusCode).send({ code: 0, msg: message, data })
 }
@@ -788,6 +792,9 @@ export async function assignmentRoutes(app) {
         if (assignment.status !== 'draft') {
           return { error: 'INVALID_STATE', status: assignment.status }
         }
+        if (deadlinePassed(assignment.due_at)) {
+          return { error: 'DEADLINE_PASSED', dueAt: assignment.due_at }
+        }
 
         const questions = db
           .prepare(
@@ -839,6 +846,11 @@ export async function assignmentRoutes(app) {
           requiredStatus: 'draft'
         })
       }
+      if (outcome.error === 'DEADLINE_PASSED') {
+        return responseError(reply, 409, '作业截止时间已过，请先更新截止时间', {
+          dueAt: outcome.dueAt
+        })
+      }
       if (outcome.error === 'INCOMPLETE') {
         return responseError(reply, 400, '作业题目与分值配置不完整', {
           questionCount: outcome.questionCount,
@@ -860,6 +872,69 @@ export async function assignmentRoutes(app) {
     }
   )
 
+  app.post(
+    '/api/v1/assignments/:id/close',
+    { preHandler: app.requireRole('teacher') },
+    async (request, reply) => {
+      const paramsResult = assignmentIdParamsSchema.safeParse(request.params)
+      if (!paramsResult.success) return validationError(reply, paramsResult)
+
+      const close = db.transaction(() => {
+        const assignment = findAssignment(db, paramsResult.data.id)
+        if (!assignment) return { error: 'NOT_FOUND' }
+        if (assignment.teacher_id !== request.auth.user.id) {
+          return { error: 'FORBIDDEN' }
+        }
+        if (assignment.status !== 'published') {
+          return { error: 'INVALID_STATE', status: assignment.status }
+        }
+
+        const timestamp = new Date().toISOString()
+        const updated = db
+          .prepare(
+            `UPDATE assignments
+             SET status = 'closed', updated_at = ?
+             WHERE id = ? AND teacher_id = ? AND status = 'published'`
+          )
+          .run(timestamp, assignment.id, request.auth.user.id)
+        if (updated.changes !== 1) return { error: 'STATE_CHANGED' }
+
+        insertAudit(db, request, {
+          action: 'assignment.closed',
+          entityType: 'assignment',
+          entityId: assignment.id,
+          details: { previousStatus: 'published', status: 'closed' }
+        })
+        return { assignmentId: assignment.id }
+      })
+
+      const outcome = close()
+      if (outcome.error === 'NOT_FOUND') {
+        return responseError(reply, 404, '作业不存在')
+      }
+      if (outcome.error === 'FORBIDDEN') {
+        return responseError(reply, 403, '只能关闭自己的作业')
+      }
+      if (outcome.error === 'INVALID_STATE') {
+        return responseError(reply, 409, '只有已发布状态的作业可以关闭', {
+          currentStatus: outcome.status,
+          requiredStatus: 'published'
+        })
+      }
+      if (outcome.error === 'STATE_CHANGED') {
+        return responseError(reply, 409, '作业状态已变化，请刷新后重试')
+      }
+
+      return responseData(
+        reply,
+        assignmentDetail(db, findAssignment(db, outcome.assignmentId), {
+          includeCorrectAnswer: true
+        }),
+        '作业已关闭'
+      )
+    }
+  )
+
   app.get(
     '/api/v1/assignments/:id',
     { preHandler: app.authenticate },
@@ -873,8 +948,8 @@ export async function assignmentRoutes(app) {
       const { role, id: userId } = request.auth.user
       if (role === 'student') {
         if (
-          assignment.status !== 'published' ||
-          assignment.course_status !== 'published'
+          !['published', 'closed'].includes(assignment.status) ||
+          !['published', 'archived'].includes(assignment.course_status)
         ) {
           return responseError(reply, 404, '作业不存在')
         }
@@ -917,20 +992,22 @@ export async function assignmentRoutes(app) {
       const save = db.transaction(() => {
         const assignment = findAssignment(db, paramsResult.data.id)
         if (!assignment) return { error: 'NOT_FOUND' }
-        if (
-          assignment.status !== 'published' ||
-          assignment.course_status !== 'published'
-        ) {
+        if (assignment.status === 'closed') {
+          return { error: 'ASSIGNMENT_CLOSED' }
+        }
+        if (assignment.status !== 'published') {
           return { error: 'NOT_AVAILABLE', status: assignment.status }
         }
-
-        const questions = findQuestions(db, assignment.id)
-        const issues = answerErrors(
-          questions,
-          input.answers,
-          input.action === 'submit'
-        )
-        if (issues.length > 0) return { error: 'INVALID_ANSWERS', issues }
+        if (assignment.course_status === 'archived') {
+          return { error: 'COURSE_ARCHIVED' }
+        }
+        if (assignment.course_status !== 'published') {
+          return {
+            error: 'NOT_AVAILABLE',
+            status: assignment.status,
+            courseStatus: assignment.course_status
+          }
+        }
 
         const existing = db
           .prepare(
@@ -941,6 +1018,26 @@ export async function assignmentRoutes(app) {
         if (existing && existing.status !== 'draft') {
           return { error: 'INVALID_STATE', status: existing.status }
         }
+
+        if (deadlinePassed(assignment.due_at)) {
+          if (input.action === 'submit') {
+            return { error: 'DEADLINE_PASSED', dueAt: assignment.due_at }
+          }
+          if (!existing) {
+            return {
+              error: 'DEADLINE_PASSED_NEW_DRAFT',
+              dueAt: assignment.due_at
+            }
+          }
+        }
+
+        const questions = findQuestions(db, assignment.id)
+        const issues = answerErrors(
+          questions,
+          input.answers,
+          input.action === 'submit'
+        )
+        if (issues.length > 0) return { error: 'INVALID_ANSWERS', issues }
 
         const submissionId = existing?.id ?? randomUUID()
         const timestamp = new Date().toISOString()
@@ -1014,7 +1111,26 @@ export async function assignmentRoutes(app) {
       }
       if (outcome.error === 'NOT_AVAILABLE') {
         return responseError(reply, 409, '作业当前不可提交', {
-          assignmentStatus: outcome.status
+          assignmentStatus: outcome.status,
+          courseStatus: outcome.courseStatus
+        })
+      }
+      if (outcome.error === 'ASSIGNMENT_CLOSED') {
+        return responseError(reply, 409, '作业已关闭，不能继续保存或提交')
+      }
+      if (outcome.error === 'COURSE_ARCHIVED') {
+        return responseError(reply, 409, '课程已归档，不能继续保存或提交')
+      }
+      if (outcome.error === 'DEADLINE_PASSED') {
+        return responseError(reply, 409, '作业已超过截止时间，不能提交', {
+          dueAt: outcome.dueAt,
+          draftPolicy: '已存在的草稿仍可保存，但不能正式提交'
+        })
+      }
+      if (outcome.error === 'DEADLINE_PASSED_NEW_DRAFT') {
+        return responseError(reply, 409, '作业已超过截止时间，不能新建草稿', {
+          dueAt: outcome.dueAt,
+          draftPolicy: '只有截止时间前已创建的草稿可以继续保存'
         })
       }
       if (outcome.error === 'INVALID_ANSWERS') {

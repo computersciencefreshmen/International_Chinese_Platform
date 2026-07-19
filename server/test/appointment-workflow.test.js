@@ -175,7 +175,9 @@ test('a student request can be accepted atomically with a classroom, notificatio
   addTeacherProfile(database, teacher.id)
   const courseId = addCourse(database, teacher.id)
 
-  const created = await requestAppointment(app, student, teacher, courseId)
+  const created = await requestAppointment(app, student, teacher, courseId, {
+    scheduledStart: futureIso(10)
+  })
   assert.equal(created.statusCode, 201)
   const appointmentId = readBody(created).data.id
   assert.equal(readBody(created).data.status, 'pending')
@@ -387,6 +389,180 @@ test('accepting an overlapping lesson is rejected without partial side effects',
   )
 })
 
+test('a student cannot be accepted into overlapping lessons with different teachers', async (t) => {
+  const { app, database } = await createTestApp(t)
+  const student = addUser(database, {
+    role: 'student',
+    displayName: '档期冲突学生'
+  })
+  const firstTeacher = addUser(database, {
+    role: 'teacher',
+    displayName: '第一位教师'
+  })
+  const secondTeacher = addUser(database, {
+    role: 'teacher',
+    displayName: '第二位教师'
+  })
+  addTeacherProfile(database, firstTeacher.id)
+  addTeacherProfile(database, secondTeacher.id)
+  const firstCourseId = addCourse(database, firstTeacher.id)
+  const secondCourseId = addCourse(database, secondTeacher.id)
+  const sharedStart = futureIso(780)
+
+  const first = await requestAppointment(
+    app,
+    student,
+    firstTeacher,
+    firstCourseId,
+    {
+      scheduledStart: sharedStart,
+      durationMinutes: 60,
+      topic: '第一位教师的课堂'
+    }
+  )
+  const second = await requestAppointment(
+    app,
+    student,
+    secondTeacher,
+    secondCourseId,
+    {
+      scheduledStart: new Date(
+        new Date(sharedStart).getTime() + 20 * 60_000
+      ).toISOString(),
+      durationMinutes: 60,
+      topic: '第二位教师的重叠课堂'
+    }
+  )
+  const firstId = readBody(first).data.id
+  const secondId = readBody(second).data.id
+
+  const accepted = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/appointments/${firstId}/respond`,
+    headers: bearer(firstTeacher.token),
+    payload: { action: 'accept' }
+  })
+  assert.equal(accepted.statusCode, 200)
+
+  const conflicted = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/appointments/${secondId}/respond`,
+    headers: bearer(secondTeacher.token),
+    payload: { action: 'accept' }
+  })
+  assert.equal(conflicted.statusCode, 409)
+  assert.equal(readBody(conflicted).data.conflictingAppointmentId, firstId)
+  assert.equal(readBody(conflicted).data.conflictingParticipant, 'student')
+  assert.equal(
+    database
+      .prepare('SELECT status FROM appointments WHERE id = ?')
+      .get(secondId).status,
+    'pending'
+  )
+  assert.equal(
+    database
+      .prepare(
+        'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
+      )
+      .get(secondId).count,
+    0
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE entity_id = ? AND action = 'appointment.accepted'`
+      )
+      .get(secondId).count,
+    0
+  )
+})
+
+test('a participant completes a classroom atomically while outsiders are rejected', async (t) => {
+  const { app, database } = await createTestApp(t)
+  const student = addUser(database, {
+    role: 'student',
+    displayName: '结课学生'
+  })
+  const outsider = addUser(database, {
+    role: 'student',
+    displayName: '无关结课用户'
+  })
+  const teacher = addUser(database, {
+    role: 'teacher',
+    displayName: '结课教师'
+  })
+  addTeacherProfile(database, teacher.id)
+  const courseId = addCourse(database, teacher.id)
+  const created = await requestAppointment(app, student, teacher, courseId)
+  const appointmentId = readBody(created).data.id
+  const accepted = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/appointments/${appointmentId}/respond`,
+    headers: bearer(teacher.token),
+    payload: { action: 'accept' }
+  })
+  const classroomId = readBody(accepted).data.classroom.id
+
+  const forbidden = await app.inject({
+    method: 'POST',
+    url: `/api/v1/classrooms/${classroomId}/complete`,
+    headers: bearer(outsider.token)
+  })
+  assert.equal(forbidden.statusCode, 403)
+
+  const completed = await app.inject({
+    method: 'POST',
+    url: `/api/v1/classrooms/${classroomId}/complete`,
+    headers: bearer(student.token)
+  })
+  assert.equal(completed.statusCode, 200)
+  assert.equal(readBody(completed).data.status, 'completed')
+  assert.equal(readBody(completed).data.classroom.status, 'closed')
+
+  const persisted = database
+    .prepare(
+      `SELECT
+        a.status AS appointment_status,
+        classroom.status AS classroom_status,
+        classroom.opened_at,
+        classroom.closed_at
+       FROM appointments AS a
+       INNER JOIN classrooms AS classroom ON classroom.appointment_id = a.id
+       WHERE a.id = ?`
+    )
+    .get(appointmentId)
+  assert.equal(persisted.appointment_status, 'completed')
+  assert.equal(persisted.classroom_status, 'closed')
+  assert.ok(Date.parse(persisted.opened_at) <= Date.parse(persisted.closed_at))
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM notifications
+         WHERE resource_id = ? AND user_id = ? AND type = 'appointment.completed'`
+      )
+      .get(appointmentId, teacher.id).count,
+    1
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE entity_id = ? AND action = 'appointment.completed'`
+      )
+      .get(appointmentId).count,
+    1
+  )
+
+  const repeated = await app.inject({
+    method: 'POST',
+    url: `/api/v1/classrooms/${classroomId}/complete`,
+    headers: bearer(teacher.token)
+  })
+  assert.equal(repeated.statusCode, 409)
+  assert.equal(readBody(repeated).data.appointmentStatus, 'completed')
+})
+
 test('appointment ownership prevents response, listing and classroom access leaks', async (t) => {
   const { app, database } = await createTestApp(t)
   const student = addUser(database, {
@@ -440,6 +616,14 @@ test('appointment ownership prevents response, listing and classroom access leak
     headers: bearer(outsiderStudent.token)
   })
   assert.equal(forbiddenJoin.statusCode, 403)
+
+  const tooEarlyJoin = await app.inject({
+    method: 'GET',
+    url: `/api/v1/classrooms/${classroomId}/join-info`,
+    headers: bearer(student.token)
+  })
+  assert.equal(tooEarlyJoin.statusCode, 409)
+  assert.equal(readBody(tooEarlyJoin).data.reason, 'TOO_EARLY')
 
   const invalidRequest = await requestAppointment(
     app,

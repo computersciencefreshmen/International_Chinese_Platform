@@ -383,3 +383,304 @@ test('assignment visibility, ownership and state transitions stay explicit', asy
   })
   assert.equal(studentSubmit.statusCode, 409)
 })
+
+test('expired deadlines reject publishing and submission without partial writes', async (t) => {
+  const { app, database } = await createAssignmentTestApp(t)
+  const student = addUser(database, 'student', '截止时间学生')
+  const secondStudent = addUser(database, 'student', '逾期新学生')
+  const teacher = addUser(database, 'teacher', '截止时间教师')
+  const courseId = addCourse(database, teacher.id)
+
+  const expiredDraft = await app.inject({
+    method: 'POST',
+    url: `/api/v1/courses/${courseId}/assignments`,
+    headers: teacher.headers,
+    payload: {
+      ...assignmentPayload('已过期的草稿'),
+      dueAt: new Date(Date.now() - 60_000).toISOString()
+    }
+  })
+  assert.equal(expiredDraft.statusCode, 201)
+  const expiredDraftId = body(expiredDraft).data.id
+
+  const expiredPublish = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${expiredDraftId}/publish`,
+    headers: teacher.headers
+  })
+  assert.equal(expiredPublish.statusCode, 409)
+  assert.match(body(expiredPublish).msg, /截止时间已过/)
+  assert.equal(
+    database
+      .prepare('SELECT status FROM assignments WHERE id = ?')
+      .get(expiredDraftId).status,
+    'draft'
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'assignment.published' AND entity_id = ?`
+      )
+      .get(expiredDraftId).count,
+    0
+  )
+
+  const activeDraft = await app.inject({
+    method: 'POST',
+    url: `/api/v1/courses/${courseId}/assignments`,
+    headers: teacher.headers,
+    payload: assignmentPayload('会在作答期间过期的作业')
+  })
+  assert.equal(activeDraft.statusCode, 201)
+  const assignmentId = body(activeDraft).data.id
+  const published = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${assignmentId}/publish`,
+    headers: teacher.headers
+  })
+  assert.equal(published.statusCode, 200)
+
+  const detail = await app.inject({
+    method: 'GET',
+    url: `/api/v1/assignments/${assignmentId}`,
+    headers: student.headers
+  })
+  const [choiceQuestion, textQuestion] = body(detail).data.questions
+  const initialAnswers = { [choiceQuestion.id]: '你好' }
+  const initialDraft = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${assignmentId}/submissions`,
+    headers: student.headers,
+    payload: { action: 'save', answers: initialAnswers }
+  })
+  assert.equal(initialDraft.statusCode, 201)
+  const submissionId = body(initialDraft).data.id
+
+  database
+    .prepare('UPDATE assignments SET due_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - 60_000).toISOString(), assignmentId)
+
+  const savedAfterDeadline = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${assignmentId}/submissions`,
+    headers: student.headers,
+    payload: {
+      action: 'save',
+      answers: { [choiceQuestion.id]: '再见' }
+    }
+  })
+  assert.equal(savedAfterDeadline.statusCode, 200)
+  assert.equal(body(savedAfterDeadline).data.status, 'draft')
+
+  const newDraftAfterDeadline = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${assignmentId}/submissions`,
+    headers: secondStudent.headers,
+    payload: {
+      action: 'save',
+      answers: { [choiceQuestion.id]: '你好' }
+    }
+  })
+  assert.equal(newDraftAfterDeadline.statusCode, 409)
+  assert.match(body(newDraftAfterDeadline).msg, /不能新建草稿/)
+  assert.match(body(newDraftAfterDeadline).data.draftPolicy, /截止时间前/)
+
+  const lateSubmit = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${assignmentId}/submissions`,
+    headers: student.headers,
+    payload: {
+      action: 'submit',
+      answers: {
+        [choiceQuestion.id]: '你好',
+        [textQuestion.id]: '这次提交不应写入数据库。'
+      }
+    }
+  })
+  assert.equal(lateSubmit.statusCode, 409)
+  assert.match(body(lateSubmit).msg, /超过截止时间/)
+  assert.match(body(lateSubmit).data.draftPolicy, /仍可保存/)
+
+  const storedSubmission = database
+    .prepare('SELECT * FROM submissions WHERE id = ?')
+    .get(submissionId)
+  assert.equal(storedSubmission.status, 'draft')
+  assert.deepEqual(JSON.parse(storedSubmission.answers_json), {
+    [choiceQuestion.id]: '再见'
+  })
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM submissions
+         WHERE assignment_id = ? AND student_id = ?`
+      )
+      .get(assignmentId, secondStudent.id).count,
+    0
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'submission.submitted' AND entity_id = ?`
+      )
+      .get(submissionId).count,
+    0
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM notifications
+         WHERE type = 'assignment.submitted' AND resource_id = ?`
+      )
+      .get(submissionId).count,
+    0
+  )
+})
+
+test('closing and archiving block writes while keeping assignment details readable', async (t) => {
+  const { app, database } = await createAssignmentTestApp(t)
+  const student = addUser(database, 'student', '状态流转学生')
+  const teacher = addUser(database, 'teacher', '状态流转教师')
+  const otherTeacher = addUser(database, 'teacher', '越权教师')
+  const courseId = addCourse(database, teacher.id)
+
+  const closedDraft = await app.inject({
+    method: 'POST',
+    url: `/api/v1/courses/${courseId}/assignments`,
+    headers: teacher.headers,
+    payload: assignmentPayload('待关闭作业')
+  })
+  const closedAssignmentId = body(closedDraft).data.id
+  const published = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${closedAssignmentId}/publish`,
+    headers: teacher.headers
+  })
+  assert.equal(published.statusCode, 200)
+
+  const forbiddenClose = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${closedAssignmentId}/close`,
+    headers: otherTeacher.headers
+  })
+  assert.equal(forbiddenClose.statusCode, 403)
+  assert.equal(
+    database
+      .prepare('SELECT status FROM assignments WHERE id = ?')
+      .get(closedAssignmentId).status,
+    'published'
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'assignment.closed' AND entity_id = ?`
+      )
+      .get(closedAssignmentId).count,
+    0
+  )
+
+  const closed = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${closedAssignmentId}/close`,
+    headers: teacher.headers
+  })
+  assert.equal(closed.statusCode, 200)
+  assert.equal(body(closed).data.status, 'closed')
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'assignment.closed' AND entity_id = ?`
+      )
+      .get(closedAssignmentId).count,
+    1
+  )
+
+  const closedDetail = await app.inject({
+    method: 'GET',
+    url: `/api/v1/assignments/${closedAssignmentId}`,
+    headers: student.headers
+  })
+  assert.equal(closedDetail.statusCode, 200)
+  assert.equal(body(closedDetail).data.status, 'closed')
+  assert.equal('correctAnswer' in body(closedDetail).data.questions[0], false)
+
+  const closedSubmit = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${closedAssignmentId}/submissions`,
+    headers: student.headers,
+    payload: { action: 'save', answers: {} }
+  })
+  assert.equal(closedSubmit.statusCode, 409)
+  assert.match(body(closedSubmit).msg, /已关闭/)
+  assert.equal(
+    database
+      .prepare(
+        'SELECT COUNT(*) AS count FROM submissions WHERE assignment_id = ?'
+      )
+      .get(closedAssignmentId).count,
+    0
+  )
+
+  const secondClose = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${closedAssignmentId}/close`,
+    headers: teacher.headers
+  })
+  assert.equal(secondClose.statusCode, 409)
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'assignment.closed' AND entity_id = ?`
+      )
+      .get(closedAssignmentId).count,
+    1
+  )
+
+  const archivedDraft = await app.inject({
+    method: 'POST',
+    url: `/api/v1/courses/${courseId}/assignments`,
+    headers: teacher.headers,
+    payload: assignmentPayload('课程归档后仍可查看的作业')
+  })
+  const archivedAssignmentId = body(archivedDraft).data.id
+  const archivedPublished = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${archivedAssignmentId}/publish`,
+    headers: teacher.headers
+  })
+  assert.equal(archivedPublished.statusCode, 200)
+  database
+    .prepare(
+      "UPDATE courses SET status = 'archived', published_at = NULL WHERE id = ?"
+    )
+    .run(courseId)
+
+  const archivedDetail = await app.inject({
+    method: 'GET',
+    url: `/api/v1/assignments/${archivedAssignmentId}`,
+    headers: student.headers
+  })
+  assert.equal(archivedDetail.statusCode, 200)
+  assert.equal(body(archivedDetail).data.course.status, 'archived')
+
+  const archivedSubmit = await app.inject({
+    method: 'POST',
+    url: `/api/v1/assignments/${archivedAssignmentId}/submissions`,
+    headers: student.headers,
+    payload: { action: 'save', answers: {} }
+  })
+  assert.equal(archivedSubmit.statusCode, 409)
+  assert.match(body(archivedSubmit).msg, /课程已归档/)
+  assert.equal(
+    database
+      .prepare(
+        'SELECT COUNT(*) AS count FROM submissions WHERE assignment_id = ?'
+      )
+      .get(archivedAssignmentId).count,
+    0
+  )
+})

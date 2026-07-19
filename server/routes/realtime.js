@@ -5,6 +5,8 @@ import { z } from 'zod'
 
 const TICKET_TTL_MS = 60_000
 const TICKET_SWEEP_INTERVAL_MS = 30_000
+const CLASSROOM_JOIN_EARLY_MS = 30 * 60 * 1000
+const CLASSROOM_JOIN_GRACE_MS = 2 * 60 * 60 * 1000
 const MAX_EVENT_BYTES = 64 * 1024
 const MAX_CHAT_LENGTH = 4000
 
@@ -174,8 +176,11 @@ function findClassroom(db, classroomId) {
     .prepare(
       `SELECT
         classroom.id,
+        classroom.room_code,
         classroom.status,
         appointment.status AS appointment_status,
+        appointment.scheduled_start,
+        appointment.scheduled_end,
         appointment.student_id,
         appointment.teacher_id,
         student.display_name AS student_display_name,
@@ -215,6 +220,32 @@ function isActiveParticipant(classroom, userId) {
     return classroom.teacher_status === 'active'
   }
   return false
+}
+
+function classroomJoinWindow(classroom, now = Date.now()) {
+  const scheduledStart = Date.parse(classroom.scheduled_start)
+  const scheduledEnd = Date.parse(classroom.scheduled_end)
+  const opensAt = scheduledStart - CLASSROOM_JOIN_EARLY_MS
+  const closesAt = scheduledEnd + CLASSROOM_JOIN_GRACE_MS
+
+  if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt)) {
+    return { allowed: false, reason: 'INVALID_SCHEDULE' }
+  }
+
+  const window = {
+    opensAt: new Date(opensAt).toISOString(),
+    closesAt: new Date(closesAt).toISOString()
+  }
+  if (now < opensAt) return { allowed: false, reason: 'TOO_EARLY', ...window }
+  if (now > closesAt) return { allowed: false, reason: 'TOO_LATE', ...window }
+  return { allowed: true, ...window }
+}
+
+function isDevelopmentDemoClassroom(app, classroom) {
+  return (
+    app.config?.nodeEnv === 'development' &&
+    classroom.room_code?.startsWith('demo-')
+  )
 }
 
 function safeSend(socket, event) {
@@ -584,6 +615,18 @@ export async function realtimeRoutes(app) {
         return responseError(reply, 409, '课堂当前不可加入')
       }
 
+      const accessWindow = classroomJoinWindow(classroom)
+      if (
+        !accessWindow.allowed &&
+        !isDevelopmentDemoClassroom(app, classroom)
+      ) {
+        return responseError(reply, 409, '当前不在课堂可加入时间内', {
+          reason: accessWindow.reason,
+          opensAt: accessWindow.opensAt ?? null,
+          closesAt: accessWindow.closesAt ?? null
+        })
+      }
+
       removeExpiredTickets()
       const { ticket, hash } = uniqueTicket(tickets)
       const expiresAt = Date.now() + TICKET_TTL_MS
@@ -600,6 +643,13 @@ export async function realtimeRoutes(app) {
           classroomId: classroom.id,
           ticket,
           expiresAt: new Date(expiresAt).toISOString(),
+          accessWindow: {
+            opensAt: accessWindow.opensAt ?? null,
+            closesAt: accessWindow.closesAt ?? null,
+            demoBypass:
+              !accessWindow.allowed &&
+              isDevelopmentDemoClassroom(app, classroom)
+          },
           websocketPath: `/ws/classroom?ticket=${encodeURIComponent(ticket)}`
         },
         '连接票据已创建',
@@ -668,10 +718,15 @@ export async function realtimeRoutes(app) {
         if (!claim) return responseError(reply, 401, '课堂连接票据无效或已过期')
 
         const classroom = findClassroom(db, claim.classroomId)
+        const accessWindow = classroom
+          ? classroomJoinWindow(classroom)
+          : { allowed: false }
         if (
           !classroom ||
           classroom.appointment_status !== 'accepted' ||
           classroom.status === 'closed' ||
+          (!accessWindow.allowed &&
+            !isDevelopmentDemoClassroom(app, classroom)) ||
           !isActiveParticipant(classroom, claim.user.id)
         ) {
           return responseError(reply, 403, '当前无法加入课堂')

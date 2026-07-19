@@ -32,10 +32,16 @@ function addUser(database, { id = randomUUID(), role, displayName }) {
   return { id, role, displayName, token: session.token }
 }
 
-function addClassroom(database, studentId, teacherId) {
+function addClassroom(database, studentId, teacherId, overrides = {}) {
   const appointmentId = randomUUID()
   const classroomId = randomUUID()
   const now = Date.now()
+  const scheduledStart = new Date(
+    now + (overrides.startOffsetMinutes ?? 1) * 60_000
+  )
+  const scheduledEnd = new Date(
+    scheduledStart.getTime() + (overrides.durationMinutes ?? 60) * 60_000
+  )
 
   database
     .prepare(
@@ -48,8 +54,8 @@ function addClassroom(database, studentId, teacherId) {
       appointmentId,
       studentId,
       teacherId,
-      new Date(now + 60_000).toISOString(),
-      new Date(now + 3_660_000).toISOString(),
+      scheduledStart.toISOString(),
+      scheduledEnd.toISOString(),
       '实时课堂测试'
     )
 
@@ -188,6 +194,29 @@ test('only classroom participants can issue tickets or read history', async (t) 
   })
   assert.equal(participantHistory.statusCode, 200)
   assert.deepEqual(readBody(participantHistory).data.items, [])
+})
+
+test('participants cannot issue a ticket before the 30 minute join window', async (t) => {
+  const { app, database } = await createTestApp(t)
+  const student = addUser(database, {
+    role: 'student',
+    displayName: '远期课堂学生'
+  })
+  const teacher = addUser(database, {
+    role: 'teacher',
+    displayName: '远期课堂教师'
+  })
+  const classroomId = addClassroom(database, student.id, teacher.id, {
+    startOffsetMinutes: 120
+  })
+
+  const issued = await issueTicket(app, classroomId, student)
+  assert.equal(issued.response.statusCode, 409)
+  assert.equal(issued.body.data.reason, 'TOO_EARLY')
+  assert.ok(Date.parse(issued.body.data.opensAt) > Date.now())
+  assert.ok(
+    Date.parse(issued.body.data.closesAt) > Date.parse(issued.body.data.opensAt)
+  )
 })
 
 test('a short-lived WebSocket ticket is consumed exactly once', async (t) => {

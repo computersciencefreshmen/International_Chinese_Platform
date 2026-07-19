@@ -3,6 +3,8 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
 const identifierSchema = z.string().trim().min(1).max(128)
+const CLASSROOM_JOIN_EARLY_MS = 30 * 60 * 1000
+const CLASSROOM_JOIN_GRACE_MS = 2 * 60 * 60 * 1000
 const dateTimeSchema = z
   .string()
   .trim()
@@ -199,6 +201,38 @@ function conflictError(error) {
     error?.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
     /UNIQUE constraint failed/i.test(error?.message ?? '')
   )
+}
+
+function classroomJoinWindow(classroom, now = Date.now()) {
+  const scheduledStart = Date.parse(classroom.scheduled_start)
+  const scheduledEnd = Date.parse(classroom.scheduled_end)
+  const opensAt = scheduledStart - CLASSROOM_JOIN_EARLY_MS
+  const closesAt = scheduledEnd + CLASSROOM_JOIN_GRACE_MS
+
+  if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt)) {
+    return { allowed: false, reason: 'INVALID_SCHEDULE' }
+  }
+
+  const window = {
+    opensAt: new Date(opensAt).toISOString(),
+    closesAt: new Date(closesAt).toISOString()
+  }
+  if (now < opensAt) return { allowed: false, reason: 'TOO_EARLY', ...window }
+  if (now > closesAt) return { allowed: false, reason: 'TOO_LATE', ...window }
+  return { allowed: true, ...window }
+}
+
+function isDevelopmentDemoClassroom(app, classroom) {
+  return (
+    app.config?.nodeEnv === 'development' &&
+    classroom.room_code?.startsWith('demo-')
+  )
+}
+
+function lifecycleFailure(code) {
+  const error = new Error(code)
+  error.lifecycleCode = code
+  return error
 }
 
 export async function appointmentRoutes(app) {
@@ -431,8 +465,8 @@ export async function appointmentRoutes(app) {
         if (result.data.action === 'accept') {
           const conflict = db
             .prepare(
-              `SELECT id FROM appointments
-               WHERE teacher_id = ?
+              `SELECT id, teacher_id, student_id FROM appointments
+               WHERE (teacher_id = ? OR student_id = ?)
                  AND status = 'accepted'
                  AND id <> ?
                  AND scheduled_start < ?
@@ -442,6 +476,7 @@ export async function appointmentRoutes(app) {
             )
             .get(
               appointment.teacher_id,
+              appointment.student_id,
               appointment.id,
               appointment.scheduled_end,
               appointment.scheduled_start
@@ -449,7 +484,11 @@ export async function appointmentRoutes(app) {
           if (conflict) {
             return {
               error: 'SCHEDULE_CONFLICT',
-              conflictingAppointmentId: conflict.id
+              conflictingAppointmentId: conflict.id,
+              conflictingParticipant:
+                conflict.teacher_id === appointment.teacher_id
+                  ? 'teacher'
+                  : 'student'
             }
           }
         }
@@ -533,7 +572,8 @@ export async function appointmentRoutes(app) {
       }
       if (outcome.error === 'SCHEDULE_CONFLICT') {
         return responseError(reply, 409, '该时间段与已接受的课堂冲突', {
-          conflictingAppointmentId: outcome.conflictingAppointmentId
+          conflictingAppointmentId: outcome.conflictingAppointmentId,
+          conflictingParticipant: outcome.conflictingParticipant
         })
       }
 
@@ -641,6 +681,130 @@ export async function appointmentRoutes(app) {
     }
   )
 
+  app.post(
+    '/api/v1/classrooms/:id/complete',
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const complete = db.transaction(() => {
+        const classroom = db
+          .prepare(
+            `SELECT
+              classroom.id AS classroom_id,
+              classroom.status AS classroom_status,
+              a.*
+            FROM classrooms AS classroom
+            INNER JOIN appointments AS a ON a.id = classroom.appointment_id
+            WHERE classroom.id = ?
+            LIMIT 1`
+          )
+          .get(request.params.id)
+
+        if (!classroom) return { error: 'NOT_FOUND' }
+
+        const role = request.auth.user.role
+        const participates =
+          (role === 'student' &&
+            classroom.student_id === request.auth.user.id) ||
+          (role === 'teacher' && classroom.teacher_id === request.auth.user.id)
+        if (!participates) return { error: 'FORBIDDEN' }
+        if (
+          classroom.status !== 'accepted' ||
+          classroom.classroom_status === 'closed'
+        ) {
+          return {
+            error: 'INVALID_STATE',
+            appointmentStatus: classroom.status,
+            classroomStatus: classroom.classroom_status
+          }
+        }
+
+        const timestamp = new Date().toISOString()
+        const appointmentUpdated = db
+          .prepare(
+            `UPDATE appointments
+             SET status = 'completed', updated_at = ?
+             WHERE id = ? AND status = 'accepted'`
+          )
+          .run(timestamp, classroom.id)
+        if (appointmentUpdated.changes !== 1) {
+          throw lifecycleFailure('APPOINTMENT_UPDATE_FAILED')
+        }
+
+        const classroomUpdated = db
+          .prepare(
+            `UPDATE classrooms
+             SET status = 'closed',
+                 opened_at = COALESCE(opened_at, ?),
+                 closed_at = ?,
+                 updated_at = ?
+             WHERE id = ? AND status IN ('scheduled', 'open')`
+          )
+          .run(timestamp, timestamp, timestamp, classroom.classroom_id)
+        if (classroomUpdated.changes !== 1) {
+          throw lifecycleFailure('CLASSROOM_UPDATE_FAILED')
+        }
+
+        const otherParticipantId =
+          role === 'student' ? classroom.teacher_id : classroom.student_id
+        insertNotification(db, {
+          userId: otherParticipantId,
+          type: 'appointment.completed',
+          title: '课堂已完成',
+          body: `${request.auth.user.displayName} 已将「${classroom.topic}」标记为完成。`,
+          appointmentId: classroom.id,
+          link:
+            role === 'student' ? '/teacher/teachingDocking' : '/student/home',
+          dedupeKey: `appointment:${classroom.id}:completed:${otherParticipantId}`
+        })
+        insertAudit(db, request, {
+          action: 'appointment.completed',
+          appointmentId: classroom.id,
+          details: {
+            previousStatus: 'accepted',
+            previousClassroomStatus: classroom.classroom_status,
+            classroomId: classroom.classroom_id,
+            completedBy: role
+          }
+        })
+
+        return { appointmentId: classroom.id }
+      })
+
+      let outcome
+      try {
+        outcome = complete()
+      } catch (error) {
+        if (error.lifecycleCode) {
+          request.log.error(
+            { err: error, lifecycleCode: error.lifecycleCode },
+            'Failed to complete classroom atomically'
+          )
+          return responseError(reply, 409, '课堂状态已发生变化，请刷新后重试')
+        }
+        throw error
+      }
+
+      if (outcome.error === 'NOT_FOUND') {
+        return responseError(reply, 404, '课堂不存在')
+      }
+      if (outcome.error === 'FORBIDDEN') {
+        return responseError(reply, 403, '只有课堂参与者可以完成课堂')
+      }
+      if (outcome.error === 'INVALID_STATE') {
+        return responseError(reply, 409, '只有已接受且未关闭的课堂可以完成', {
+          appointmentStatus: outcome.appointmentStatus,
+          classroomStatus: outcome.classroomStatus
+        })
+      }
+
+      return responseData(
+        reply,
+        appointmentData(findAppointment(db, outcome.appointmentId)),
+        '课堂已完成'
+      )
+    }
+  )
+
   app.get(
     '/api/v1/classrooms/:id/join-info',
     { preHandler: app.authenticate },
@@ -652,6 +816,8 @@ export async function appointmentRoutes(app) {
             classroom.room_code,
             classroom.status AS classroom_status,
             a.status AS appointment_status,
+            a.scheduled_start,
+            a.scheduled_end,
             a.student_id,
             a.teacher_id,
             student.display_name AS student_display_name,
@@ -683,6 +849,18 @@ export async function appointmentRoutes(app) {
         return responseError(reply, 409, '课堂当前不可加入')
       }
 
+      const accessWindow = classroomJoinWindow(classroom)
+      if (
+        !accessWindow.allowed &&
+        !isDevelopmentDemoClassroom(app, classroom)
+      ) {
+        return responseError(reply, 409, '当前不在课堂可加入时间内', {
+          reason: accessWindow.reason,
+          opensAt: accessWindow.opensAt ?? null,
+          closesAt: accessWindow.closesAt ?? null
+        })
+      }
+
       const iceServers = []
       if (app.config?.turnUrl) {
         iceServers.push({
@@ -699,6 +877,12 @@ export async function appointmentRoutes(app) {
       return responseData(reply, {
         classroomId: classroom.id,
         roomCode: classroom.room_code,
+        accessWindow: {
+          opensAt: accessWindow.opensAt ?? null,
+          closesAt: accessWindow.closesAt ?? null,
+          demoBypass:
+            !accessWindow.allowed && isDevelopmentDemoClassroom(app, classroom)
+        },
         iceServers,
         participants: [
           {
