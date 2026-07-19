@@ -179,6 +179,24 @@ test('a student request can be accepted atomically with a classroom, notificatio
   assert.equal(created.statusCode, 201)
   const appointmentId = readBody(created).data.id
   assert.equal(readBody(created).data.status, 'pending')
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM notifications
+         WHERE resource_id = ? AND type = 'appointment.requested'`
+      )
+      .get(appointmentId).count,
+    1
+  )
+  assert.equal(
+    database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'appointment.requested' AND entity_id = ?`
+      )
+      .get(appointmentId).count,
+    1
+  )
 
   const accepted = await app.inject({
     method: 'PATCH',
@@ -199,7 +217,7 @@ test('a student request can be accepted atomically with a classroom, notificatio
          WHERE resource_type = 'appointment' AND resource_id = ?`
       )
       .get(appointmentId).count,
-    2
+    3
   )
   assert.equal(
     database
@@ -225,6 +243,7 @@ test('a student request can be accepted atomically with a classroom, notificatio
     new Set(readBody(joinInfo).data.participants.map((item) => item.role)),
     new Set(['student', 'teacher'])
   )
+  assert.deepEqual(readBody(joinInfo).data.iceServers, [])
 })
 
 test('teachers can reject pending requests and either participant can cancel an active request', async (t) => {

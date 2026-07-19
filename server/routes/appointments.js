@@ -257,7 +257,7 @@ export async function appointmentRoutes(app) {
       ).toISOString()
       const timestamp = new Date().toISOString()
 
-      try {
+      const createAppointment = db.transaction(() => {
         db.prepare(
           `INSERT INTO appointments (
             id, student_id, teacher_id, course_id, scheduled_start,
@@ -276,6 +276,30 @@ export async function appointmentRoutes(app) {
           timestamp,
           timestamp
         )
+
+        insertNotification(db, {
+          userId: teacher.id,
+          type: 'appointment.requested',
+          title: '收到新的课堂预约',
+          body: `${request.auth.user.displayName} 预约了「${result.data.topic}」。`,
+          appointmentId,
+          link: '/teacher/teachingDocking',
+          dedupeKey: `appointment:${appointmentId}:requested:${teacher.id}`
+        })
+        insertAudit(db, request, {
+          action: 'appointment.requested',
+          appointmentId,
+          details: {
+            teacherId: teacher.id,
+            courseId,
+            scheduledStart,
+            scheduledEnd
+          }
+        })
+      })
+
+      try {
+        createAppointment()
       } catch (error) {
         if (conflictError(error)) {
           return responseError(reply, 409, '相同时间的预约已经存在')
@@ -454,26 +478,26 @@ export async function appointmentRoutes(app) {
 
           insertNotification(db, {
             userId: appointment.student_id,
-            type: 'appointment_accepted',
+            type: 'appointment.accepted',
             title: '预约已被教师接受',
             body: result.data.note || '教师已接受你的课堂预约。',
             appointmentId: appointment.id,
-            link: `/classrooms/${classroomId}`,
+            link: `/student/liveClass?classroomId=${classroomId}`,
             dedupeKey: `appointment:${appointment.id}:accepted:${appointment.student_id}`
           })
           insertNotification(db, {
             userId: appointment.teacher_id,
-            type: 'appointment_accepted',
+            type: 'appointment.accepted',
             title: '课堂预约已确认',
             body: '课堂已进入排期，并已创建专属教室。',
             appointmentId: appointment.id,
-            link: `/classrooms/${classroomId}`,
+            link: `/teacher/liveClass?classroomId=${classroomId}`,
             dedupeKey: `appointment:${appointment.id}:accepted:${appointment.teacher_id}`
           })
         } else {
           insertNotification(db, {
             userId: appointment.student_id,
-            type: 'appointment_rejected',
+            type: 'appointment.rejected',
             title: '预约未被接受',
             body: result.data.note || '教师当前无法接受该预约。',
             appointmentId: appointment.id,
@@ -577,7 +601,7 @@ export async function appointmentRoutes(app) {
           role === 'student' ? appointment.teacher_id : appointment.student_id
         insertNotification(db, {
           userId: otherParticipantId,
-          type: 'appointment_cancelled',
+          type: 'appointment.cancelled',
           title: '课堂预约已取消',
           body: result.data.reason || '预约已由另一位参与者取消。',
           appointmentId: appointment.id,
@@ -659,9 +683,23 @@ export async function appointmentRoutes(app) {
         return responseError(reply, 409, '课堂当前不可加入')
       }
 
+      const iceServers = []
+      if (app.config?.turnUrl) {
+        iceServers.push({
+          urls: app.config.turnUrl,
+          ...(app.config.turnUsername
+            ? { username: app.config.turnUsername }
+            : {}),
+          ...(app.config.turnCredential
+            ? { credential: app.config.turnCredential }
+            : {})
+        })
+      }
+
       return responseData(reply, {
         classroomId: classroom.id,
         roomCode: classroom.room_code,
+        iceServers,
         participants: [
           {
             id: classroom.student_id,
