@@ -1,0 +1,39 @@
+import { resolve } from 'node:path'
+import process from 'node:process'
+import { pathToFileURL } from 'node:url'
+
+import { createDatabase, DEFAULT_DATABASE_FILE } from './database.js'
+import {
+  DEMO_ACCOUNTS,
+  DEMO_IDS,
+  DEMO_PASSWORD,
+  hashPassword,
+  seedDatabase,
+  verifyPasswordHash
+} from './seed-data.js'
+
+export {
+  DEMO_ACCOUNTS,
+  DEMO_IDS,
+  DEMO_PASSWORD,
+  hashPassword,
+  seedDatabase,
+  verifyPasswordHash
+}
+
+function isMainModule() {
+  return (
+    Boolean(process.argv[1]) &&
+    pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+  )
+}
+
+if (isMainModule()) {
+  const filename = process.argv[2] || DEFAULT_DATABASE_FILE
+  const database = createDatabase({ filename })
+  const result = seedDatabase(database)
+  database.close()
+  process.stdout.write(
+    `Demo data seeded: ${filename} (${result.users} users, ${result.courses} courses)\n`
+  )
+}

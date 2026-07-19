@@ -159,9 +159,7 @@ const router = createRouter({
           path: 'teachingDocking',
           name: 'teachingDocking',
           component: () =>
-            import(
-              '@/views/teacher/TeachingDockingPage/teachingDockingPage.vue'
-            )
+            import('@/views/teacher/TeachingDockingPage/teachingDockingPage.vue')
         },
         // 网络课程模块
         {
@@ -196,9 +194,7 @@ const router = createRouter({
     {
       path: '/administrator',
       component: () =>
-        import(
-          '@/views/administrator/administratorLayout/administratorLayout.vue'
-        ),
+        import('@/views/administrator/administratorLayout/administratorLayout.vue'),
       meta: { requiresAuth: true, role: 'administrator' },
       redirect: '/administrator/courseDocking', // 重定向到首页
       children: [
@@ -238,9 +234,7 @@ const router = createRouter({
               path: 'changePasswordAdmin',
               name: 'changePasswordAdmin',
               component: () =>
-                import(
-                  '@/views/administrator/personalCenter/changePassword.vue'
-                )
+                import('@/views/administrator/personalCenter/changePassword.vue')
             },
             {
               // 消息通知模块
