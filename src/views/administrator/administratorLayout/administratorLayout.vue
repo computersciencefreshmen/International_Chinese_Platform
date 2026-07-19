@@ -1,202 +1,159 @@
 <script setup>
-import { ref, nextTick } from 'vue' //引入vue的计算属性
-import MySearchBox from '@/components/basic/MySearchBox.vue' //引入自定义搜索框组件
-import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
-import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import logoComponent from '@/components/service/logoComponent.vue'
+import { useUserStore } from '@/stores'
+import defaultAvatar from '@/assets/student/avatar.png'
 
-// 引入仓库
-import { useAdminStore } from '@/stores'
-
-const adminStore = useAdminStore()
-
-// 引入路由
-import { useRouter } from 'vue-router'
+const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const isLoggingOut = ref(false)
 
-// tab切换内容设置
-const tabList = [
+const navigation = [
   { name: '课程对接', path: '/administrator/courseDocking' },
   { name: '审核中心', path: '/administrator/auditCenter' },
   { name: '数据中心', path: '/administrator/dataCenter' }
 ]
 
-//获取tab栏切换的盒子
-const tabRef = ref([])
+const profile = computed(() => userStore.profile || {})
+const displayName = computed(() => profile.value.displayName || '平台管理员')
+const avatarUrl = computed(() => profile.value.avatarUrl || defaultAvatar)
 
-// 获取下划线
-const lineRef = ref(null)
+const activePath = computed(() => route.path)
+const isNavigationActive = (path) => activePath.value.startsWith(path)
+const isMessageActive = computed(
+  () => activePath.value === '/administrator/center/AdminMessage'
+)
+const isProfileActive = computed(
+  () =>
+    activePath.value.startsWith('/administrator/center') &&
+    !isMessageActive.value
+)
 
-// 定义tab栏高亮下标
-const activeTabIndex = ref(0)
+const goTo = (path) => router.push(path)
 
-// 获取消息提醒盒子
-const messageRef = ref(null)
+const handleLogout = async () => {
+  if (isLoggingOut.value) return
 
-//获取个人中心盒子
-const personalCenterRef = ref(null)
-
-//定义设置高亮横线位置函数
-const placeHightLine = (left, width) => {
-  lineRef.value.style.left = left + 'px'
-  lineRef.value.style.width = width + 'px'
-}
-
-// 获取鼠标移入时，当前盒子的位置
-const handleMouseEnter = (event) => {
-  const { left, width } = event.currentTarget.getBoundingClientRect()
-  placeHightLine(left, width)
-}
-
-// 获取鼠标移出时，横向回到高亮盒子的位置
-const handleMouseLeave = () => {
-  // 获取高亮盒子的位置
-  let activeTab = null
-  // 如果activeTabIndex的值小于4，则获取tab栏切换高亮盒子的位置
-  if (activeTabIndex.value < 4) {
-    activeTab = tabRef.value[activeTabIndex.value]
-  } else if (activeTabIndex.value === 4) {
-    // 如果activeTabIndex的值等于4，则获取消息提醒高亮盒子的位置
-    activeTab = messageRef.value
-  } else if (activeTabIndex.value === 5) {
-    // 如果activeTabIndex的值等于5，则获取个人中心高亮盒子的位置
-    activeTab = personalCenterRef.value
+  isLoggingOut.value = true
+  try {
+    await userStore.logout()
+  } catch {
+    // 即使退出接口暂时不可用，store 也会清除本地会话。
+  } finally {
+    isLoggingOut.value = false
+    await router.replace('/login')
   }
-
-  const { left, width } = activeTab.getBoundingClientRect()
-  placeHightLine(left, width)
 }
-
-// 首次加载页面时，让横线移动到第一个盒子的位置
-const moveLineToFirstTab = () => {
-  nextTick(() => {
-    // 确保 DOM 更新完成后执行
-    if (tabRef.value.length > 0) {
-      const firstTab = tabRef.value[0]
-      const { left, width } = firstTab.getBoundingClientRect()
-      placeHightLine(left, width)
-    }
-    handleContainerHeight() // 添加导航栏高度
-  })
-}
-
-// 鼠标点击tab栏事件
-const handleTabClick = (number1, number2, path) => {
-  activeTabIndex.value = number1
-  router.push(path)
-  adminStore.isTabActive = number2
-}
-
-//定义导航栏容器高度
-const containerHeight = ref(null)
-
-//定义导航栏
-const headerRef = ref(null)
-
-//定义占位盒子
-const fakeHeader = ref(null)
-
-//一进页面就计算导航栏的高度
-const handleContainerHeight = () => {
-  //获取导航栏的高度
-  containerHeight.value = headerRef.value.offsetHeight
-  //设置占位盒子的高度
-  fakeHeader.value.style.height = containerHeight.value + 'px'
-}
-
-//监听窗口大小变化，改变高亮线的位置
-window.addEventListener('resize', handleMouseLeave)
-
-setTimeout(() => {
-  moveLineToFirstTab()
-}, 200)
 </script>
 
 <template>
-  <div class="flex flex-col min-h-screen bg-image">
-    <!-- 头部导航栏填写 -->
+  <div class="bg-image flex min-h-screen flex-col">
     <header
-      ref="headerRef"
-      class="flex flex-row bg-primary bg-primary1 px-4 py-1 relative border-b border-gray-300"
-      style="position: fixed; top: 0; left: 0; right: 0; z-index: 100"
+      class="admin-header sticky top-0 z-[100] flex min-h-16 flex-row items-center border-b border-gray-300 bg-primary bg-primary1 px-4 py-1"
     >
-      <!-- logo -->
-      <logoComponent></logoComponent>
-      <span
-        ref="lineRef"
-        class="absolute bottom-0 left-0 h-1 bg-blue-300 transition-all duration-500 ease-out rounded-lg"
-      ></span>
-      <!-- 导航栏 -->
-      <div class="flex-1 flex flex-row items-center ml-8">
-        <!-- tab栏切换 -->
-        <nav
-          ref="tabRef"
-          v-for="(item, index) in tabList"
-          :key="item.name"
-          @click="
-            () => {
-              activeTabIndex = index
-              $router.push(item.path)
-            }
-          "
-          :class="{ 'bg-blue-300': activeTabIndex === index }"
-          @mouseenter="handleMouseEnter"
-          @mouseleave="handleMouseLeave"
-          class="cursor-pointer px-4 py-2 mx-1 transition-all duration-100 rounded-lg hover:bg-blue-300 ease-linear"
+      <button
+        type="button"
+        class="logo-button shrink-0 rounded-lg p-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+        aria-label="返回管理员课程对接页"
+        @click="goTo('/administrator/courseDocking')"
+      >
+        <logoComponent />
+      </button>
+
+      <nav
+        class="ml-8 flex min-w-0 flex-1 flex-row items-center"
+        aria-label="管理员工作台主导航"
+      >
+        <button
+          v-for="item in navigation"
+          :key="item.path"
+          type="button"
+          class="nav-item mx-1 cursor-pointer rounded-lg px-4 py-2 text-base font-medium transition hover:bg-blue-300 lg:text-xl"
+          :class="{ active: isNavigationActive(item.path) }"
+          :aria-current="isNavigationActive(item.path) ? 'page' : undefined"
+          @click="goTo(item.path)"
         >
-          <text class="text-md font-sans lg:text-xl">{{ item.name }}</text>
-        </nav>
-        <!-- 语言切换 -->
-        <div class="mx-1">
-          <LanguageToggle />
-        </div>
-        <!-- 搜索框 -->
-        <div class="mx-2 hidden md:block flex-1">
-          <MySearchBox />
-        </div>
-        <!-- 个人中心 -->
-        <div class="flex items-center justify-center">
+          {{ item.name }}
+        </button>
+      </nav>
+
+      <div class="flex shrink-0 items-center justify-center gap-2">
+        <button
+          type="button"
+          class="icon-button rounded-lg border-2 p-2 transition hover:border-blue-300 hover:bg-blue-50"
+          :class="
+            isMessageActive ? 'border-blue-300 bg-blue-50' : 'border-primary'
+          "
+          title="查看消息通知"
+          aria-label="查看消息通知"
+          :aria-current="isMessageActive ? 'page' : undefined"
+          @click="goTo('/administrator/center/AdminMessage')"
+        >
+          <img class="h-6 w-6" src="@/assets/student/message.png" alt="" />
+        </button>
+
+        <button
+          type="button"
+          class="flex max-w-52 items-center justify-center rounded-full p-1 transition hover:bg-blue-300"
+          :class="{ 'bg-blue-300': isProfileActive }"
+          :aria-current="isProfileActive ? 'page' : undefined"
+          @click="goTo('/administrator/center/changePasswordAdmin')"
+        >
           <img
-            class="h-10 w-10 mx-2 cursor-pointer border-2 border-primary hover:border-blue-300 p-2 rounded-lg transition-all duration-100 ease-linear"
-            src="@/assets/student/message.png"
-            alt="消息提醒"
-            ref="messageRef"
-            @mouseenter="handleMouseEnter"
-            @mouseleave="handleMouseLeave"
-            :class="{ '!border-blue-300': activeTabIndex === 4 }"
-            @click="
-              handleTabClick(4, 1, '/administrator/personalCenter/message')
-            "
+            class="mr-2 h-10 w-10 rounded-full border-2 border-gray-300 object-cover"
+            :src="avatarUrl"
+            alt=""
           />
-          <!-- 个人头像 -->
-          <div
-            class="flex items-center justify-center ml-2 cursor-pointer hover:bg-blue-300 p-1 rounded-full transition-all duration-100 ease-linear"
-            ref="personalCenterRef"
-            @mouseenter="handleMouseEnter"
-            @mouseleave="handleMouseLeave"
-            @click="
-              handleTabClick(
-                5,
-                0,
-                '/administrator/personalCenter/changePassword'
-              )
-            "
-            :class="{ 'bg-blue-300': activeTabIndex === 5 }"
-          >
-            <img
-              class="h-10 w-10 rounded-full mr-2 border-2 border-gray-300"
-              src="@/assets/student/avatar.png"
-              alt="个人头像"
-            />
-            <text>Kimberly</text>
-          </div>
-        </div>
+          <span class="truncate">{{ displayName }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="rounded-lg border border-red-200 bg-white/90 px-3 py-2 font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-wait disabled:opacity-60"
+          :disabled="isLoggingOut"
+          @click="handleLogout"
+        >
+          {{ isLoggingOut ? '退出中…' : '退出登录' }}
+        </button>
       </div>
     </header>
-    <!-- 占位盒子 -->
-    <div ref="fakeHeader"></div>
-    <!-- 主体内容填写 -->
-    <router-view class="flex-1"></router-view>
+
+    <router-view class="flex-1" />
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+.logo-button,
+.nav-item,
+.icon-button {
+  border-style: solid;
+  cursor: pointer;
+}
+
+.logo-button,
+.nav-item {
+  border-color: transparent;
+  background-color: transparent;
+}
+
+.nav-item {
+  position: relative;
+}
+
+.nav-item.active {
+  background-color: rgb(147 197 253);
+}
+
+.nav-item.active::after {
+  position: absolute;
+  right: 12px;
+  bottom: -5px;
+  left: 12px;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgb(147 197 253);
+  content: '';
+}
+</style>

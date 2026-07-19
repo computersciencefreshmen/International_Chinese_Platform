@@ -1,15 +1,13 @@
 import request from '@/utils/request'
 
-//[C001C]注册邮箱发送邮箱验证码
-export const sendEmail = (email) => {
+// 注册邮箱验证码；本地开发环境会返回 developmentCode 方便演示。
+export const sendEmail = (email, role = 'student') => {
   return request({
-    url: '/common/sendRegisterEmailCode',
+    url: '/auth/verification-code',
     method: 'POST',
     data: {
-      data: {
-        // 关键修复：按照API要求嵌套在data对象中
-        email
-      }
+      email,
+      role
     }
   })
 }

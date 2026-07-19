@@ -1,241 +1,254 @@
 <script setup>
-import { ref, nextTick, watch, onUnmounted } from 'vue' //引入vue的计算属性
-import MySearchBox from '@/components/basic/MySearchBox.vue' //引入自定义搜索框组件
-import logoComponent from '@/components/service/logoComponent.vue' //引入自定义logo组件
-import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
-import { useWebSocket } from '@/utils/websocket.js'
-import { createWebSocketUrl } from '@/config/runtime'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import logoComponent from '@/components/service/logoComponent.vue'
+import LanguageToggle from '@/components/service/LanguageToggle.vue'
+import defaultAvatar from '@/assets/student/avatar.png'
+import { getNotifications } from '@/api/platform'
+import { useUserStore } from '@/stores'
 
-// 引入仓库
-import { useStudentStore } from '@/stores'
-
-const studentStore = useStudentStore()
-// 引入路由
-import { useRouter } from 'vue-router'
+const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const unread = ref(0)
 
-const userInfo = studentStore.getUserInfo()
-const token = userInfo?.token
-const canConnectWebSocket = Boolean(token && String(token).trim())
-const messages = ref([])
-
-// 未登录时不创建 WebSocket 实例，避免空 token 触发连接或重连
-const status = canConnectWebSocket
-  ? useWebSocket({
-      url: createWebSocketUrl(token),
-      onMessage: (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          messages.value.push(`收到消息: ${JSON.stringify(data)}`)
-        } catch {
-          messages.value.push(`收到非JSON消息: ${event.data}`)
-        }
-      },
-      onOpen: () => {
-        messages.value.push('连接已建立')
-      },
-      onError: (error) => {
-        messages.value.push(`连接错误: ${error?.message || '未知错误'}`)
-      }
-    }).status
-  : ref('closed')
-
-// 实时监听连接状态
-watch(status, (newStatus) => {
-  if (newStatus === 'closed') {
-    messages.value.push('连接已关闭')
-  }
-})
-
-// tab切换内容设置
-const tabList = [
-  { name: '首页', path: '/student/home' },
-  { name: '预约老师', path: '/student/order' },
-  { name: '发布预约', path: '/student/publish' },
-  { name: '网络课程', path: '/student/course' }
+const tabs = [
+  { name: '学习首页', path: '/student/home', match: '/student/home' },
+  { name: '预约老师', path: '/student/order', match: '/student/order' },
+  { name: '网络课程', path: '/student/course', match: '/student/course' },
+  { name: '对话练习', path: '/student/chatTurn', match: '/student/chatTurn' }
 ]
 
-//获取tab栏切换的盒子
-const tabRef = ref([])
+const profile = computed(() => userStore.profile || {})
+const avatar = computed(() => profile.value.avatarUrl || defaultAvatar)
 
-// 获取下划线
-const lineRef = ref(null)
-
-// 定义tab栏高亮下标
-const activeTabIndex = ref(0)
-
-// 获取消息提醒盒子
-const messageRef = ref(null)
-
-//获取个人中心盒子
-const personalCenterRef = ref(null)
-
-//定义设置高亮横线位置函数
-const placeHightLine = (left, width) => {
-  if (!lineRef.value) return
-
-  lineRef.value.style.left = left + 'px'
-  lineRef.value.style.width = width + 'px'
+function isActive(tab) {
+  return route.path.startsWith(tab.match)
 }
 
-// 获取鼠标移入时，当前盒子的位置
-const handleMouseEnter = (event) => {
-  const { left, width } = event.currentTarget.getBoundingClientRect()
-  placeHightLine(left, width)
-}
-
-// 获取鼠标移出时，横向回到高亮盒子的位置
-const handleMouseLeave = () => {
-  // 获取高亮盒子的位置
-  let activeTab = null
-  // 如果activeTabIndex的值小于4，则获取tab栏切换高亮盒子的位置
-  if (activeTabIndex.value < 4) {
-    activeTab = tabRef.value[activeTabIndex.value]
-  } else if (activeTabIndex.value === 4) {
-    // 如果activeTabIndex的值等于4，则获取消息提醒高亮盒子的位置
-    activeTab = messageRef.value
-  } else if (activeTabIndex.value === 5) {
-    // 如果activeTabIndex的值等于5，则获取个人中心高亮盒子的位置
-    activeTab = personalCenterRef.value
+async function refreshUnread() {
+  if (!userStore.isAuthenticated) return
+  try {
+    const data = await getNotifications({
+      status: 'unread',
+      page: 1,
+      pageSize: 1
+    })
+    unread.value = data.unread
+  } catch {
+    unread.value = 0
   }
-
-  if (!activeTab) return
-
-  const { left, width } = activeTab.getBoundingClientRect()
-  placeHightLine(left, width)
 }
 
-// 首次加载页面时，让横线移动到第一个盒子的位置
-const moveLineToFirstTab = () => {
-  nextTick(() => {
-    // 确保 DOM 更新完成后执行
-    if (tabRef.value.length > 0) {
-      const firstTab = tabRef.value[0]
-      const { left, width } = firstTab.getBoundingClientRect()
-      placeHightLine(left, width)
-    }
-    handleContainerHeight() // 添加导航栏高度
-  })
+function openNotifications() {
+  unread.value = 0
+  router.push('/student/center/message')
 }
 
-// 鼠标点击tab栏事件
-const handleTabClick = (number1, number2, path) => {
-  activeTabIndex.value = number1
-  router.push(path)
-  studentStore.isTabActive = number2
-}
-
-//定义导航栏容器高度
-const containerHeight = ref(null)
-
-//定义导航栏
-const headerRef = ref(null)
-
-//定义占位盒子
-const fakeHeader = ref(null)
-
-//一进页面就计算导航栏的高度
-const handleContainerHeight = () => {
-  if (!headerRef.value || !fakeHeader.value) return
-
-  //获取导航栏的高度
-  containerHeight.value = headerRef.value.offsetHeight
-  //设置占位盒子的高度
-  fakeHeader.value.style.height = containerHeight.value + 'px'
-}
-
-//监听窗口大小变化，改变高亮线的位置
-window.addEventListener('resize', handleMouseLeave)
-
-const moveLineTimer = window.setTimeout(() => {
-  moveLineToFirstTab()
-}, 200)
-
-// 组件卸载时断开连接
-onUnmounted(() => {
-  window.clearTimeout(moveLineTimer)
-  window.removeEventListener('resize', handleMouseLeave)
-})
+onMounted(refreshUnread)
+watch(
+  () => route.fullPath,
+  (path) => {
+    if (!path.startsWith('/student/center/message')) refreshUnread()
+  }
+)
 </script>
 
 <template>
-  <div class="flex flex-col min-h-screen bg-image">
-    <!-- 头部导航栏填写 -->
-    <header
-      ref="headerRef"
-      class="flex flex-row bg-primary bg-primary1 px-4 py-1 relative border-b border-gray-300"
-      style="position: fixed; top: 0; left: 0; right: 0; z-index: 100"
-    >
-      <!-- logo -->
-      <logoComponent></logoComponent>
-      <span
-        ref="lineRef"
-        class="absolute bottom-0 left-0 h-1 bg-blue-300 transition-all duration-500 ease-out rounded-lg"
-      ></span>
-      <!-- 导航栏 -->
-      <div class="flex-1 flex flex-row items-center ml-8">
-        <!-- tab栏切换 -->
-        <nav
-          ref="tabRef"
-          v-for="(item, index) in tabList"
-          :key="item.name"
-          @click="
-            () => {
-              activeTabIndex = index
-              $router.push(item.path)
-            }
-          "
-          :class="{ 'bg-blue-300': activeTabIndex === index }"
-          @mouseenter="handleMouseEnter"
-          @mouseleave="handleMouseLeave"
-          class="cursor-pointer px-4 py-2 mx-1 transition-all duration-100 rounded-lg hover:bg-blue-300 ease-linear"
+  <div class="student-shell">
+    <header class="student-header">
+      <logoComponent class="brand" />
+      <nav aria-label="学生主导航">
+        <RouterLink
+          v-for="tab in tabs"
+          :key="tab.path"
+          :to="tab.path"
+          :class="{ active: isActive(tab) }"
         >
-          <text class="text-md font-sans lg:text-xl">{{ item.name }}</text>
-        </nav>
-        <!-- 语言切换 -->
-        <div class="mx-1">
-          <LanguageToggle />
-        </div>
-        <!-- 搜索框 -->
-        <div class="mx-2 hidden md:block flex-1">
-          <MySearchBox />
-        </div>
-        <!-- 个人中心 -->
-        <div class="flex items-center justify-center">
-          <img
-            class="h-10 w-10 mx-2 cursor-pointer border-2 border-primary hover:border-blue-300 p-2 rounded-lg transition-all duration-100 ease-linear"
-            src="@/assets/student/message.png"
-            alt="消息提醒"
-            ref="messageRef"
-            @mouseenter="handleMouseEnter"
-            @mouseleave="handleMouseLeave"
-            :class="{ '!border-blue-300': activeTabIndex === 4 }"
-            @click="handleTabClick(4, 3, '/student/center/message')"
-          />
-          <!-- 个人头像 -->
-          <div
-            class="flex items-center justify-center ml-2 cursor-pointer hover:bg-blue-300 p-1 rounded-full transition-all duration-100 ease-linear"
-            ref="personalCenterRef"
-            @mouseenter="handleMouseEnter"
-            @mouseleave="handleMouseLeave"
-            @click="handleTabClick(5, 0, '/student/center/info')"
-            :class="{ 'bg-blue-300': activeTabIndex === 5 }"
-          >
-            <img
-              class="h-10 w-10 rounded-full mr-2 border-2 border-gray-300"
-              src="@/assets/student/avatar.png"
-              alt="个人头像"
-            />
-            <text>Kimberly</text>
-          </div>
-        </div>
+          {{ tab.name }}
+        </RouterLink>
+      </nav>
+      <div class="header-tools">
+        <LanguageToggle class="language-toggle" />
+        <button
+          type="button"
+          class="notice-button"
+          aria-label="打开消息通知"
+          @click="openNotifications"
+        >
+          <span aria-hidden="true">信</span>
+          <b v-if="unread > 0">{{ unread > 99 ? '99+' : unread }}</b>
+        </button>
+        <button
+          type="button"
+          class="profile-button"
+          @click="router.push('/student/center/info')"
+        >
+          <img :src="avatar" alt="个人头像" />
+          <span>{{ profile.displayName || '学习者' }}</span>
+        </button>
       </div>
     </header>
-    <!-- 占位盒子 -->
-    <div ref="fakeHeader"></div>
-    <!-- 主体内容填写 -->
-    <router-view class="flex-1"></router-view>
+    <main class="student-content">
+      <RouterView />
+    </main>
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+.student-shell {
+  min-height: 100vh;
+  color: #17313a;
+  background: #f5f1e8;
+}
+
+.student-header {
+  position: sticky;
+  z-index: 100;
+  top: 0;
+  display: grid;
+  align-items: center;
+  grid-template-columns: auto 1fr auto;
+  gap: clamp(18px, 3vw, 44px);
+  min-height: 68px;
+  border-bottom: 1px solid rgba(23, 49, 58, 0.14);
+  padding: 7px clamp(14px, 3vw, 42px);
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 0 5px 22px rgba(23, 49, 58, 0.05);
+  backdrop-filter: blur(14px);
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', serif;
+}
+
+.brand {
+  min-width: 150px;
+}
+
+nav {
+  display: flex;
+  align-self: stretch;
+  justify-content: center;
+  gap: 4px;
+}
+
+nav a {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0 15px;
+  color: #65777c;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+nav a::after {
+  position: absolute;
+  right: 14px;
+  bottom: 5px;
+  left: 14px;
+  height: 2px;
+  background: #bd4435;
+  content: '';
+  transform: scaleX(0);
+  transition: transform 0.2s ease;
+}
+
+nav a:hover,
+nav a.active {
+  color: #17313a;
+}
+
+nav a.active::after {
+  transform: scaleX(1);
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notice-button,
+.profile-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 0;
+  color: #17313a;
+  background: transparent;
+  cursor: pointer;
+}
+
+.notice-button {
+  width: 40px;
+  height: 40px;
+  justify-content: center;
+  border: 1px solid rgba(23, 49, 58, 0.18);
+  font-weight: 700;
+}
+
+.notice-button b {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  min-width: 20px;
+  border: 2px solid #fffdf7;
+  border-radius: 999px;
+  padding: 1px 5px;
+  color: white;
+  background: #bd4435;
+  font:
+    9px ui-monospace,
+    monospace;
+}
+
+.profile-button {
+  gap: 8px;
+  padding: 4px 8px 4px 4px;
+}
+
+.profile-button img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-button span {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-content {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .student-header {
+    grid-template-columns: auto 1fr;
+  }
+
+  nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    order: 3;
+    overflow-x: auto;
+  }
+
+  nav a {
+    min-height: 42px;
+  }
+
+  .header-tools {
+    justify-self: end;
+  }
+}
+
+@media (max-width: 620px) {
+  .language-toggle,
+  .profile-button span {
+    display: none;
+  }
+}
+</style>

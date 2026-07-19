@@ -1,25 +1,35 @@
 import request from '@/utils/request'
 
-const loginEndpoints = {
-  teacher: '/teacher/login',
-  administrator: '/administrator/login'
-}
-
 export const loginByRole = (role, email, password) => {
-  const url = loginEndpoints[role]
-
-  if (!url) {
-    throw new Error(`Unsupported login role: ${role}`)
-  }
-
   return request({
-    url,
+    url: '/auth/login',
     method: 'POST',
     data: {
-      data: {
-        email,
-        password
-      }
+      email,
+      password,
+      role
     }
+  })
+}
+
+export const registerByRole = (registration) => {
+  return request({
+    url: '/auth/register',
+    method: 'POST',
+    data: registration
+  })
+}
+
+export const getSession = () => {
+  return request({
+    url: '/auth/session',
+    method: 'GET'
+  })
+}
+
+export const logoutSession = () => {
+  return request({
+    url: '/auth/logout',
+    method: 'POST'
   })
 }
