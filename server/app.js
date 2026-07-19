@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
+import multipart from '@fastify/multipart'
 import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
@@ -17,6 +18,9 @@ import assignmentRoutes from './routes/assignments.js'
 import authRoutes from './routes/auth.js'
 import appointmentRoutes from './routes/appointments.js'
 import courseRoutes from './routes/courses.js'
+import dialogueRoutes from './routes/dialogues.js'
+import fileRoutes from './routes/files.js'
+import notificationRoutes from './routes/notifications.js'
 import profileRoutes from './routes/profile.js'
 import teacherRoutes from './routes/teachers.js'
 
@@ -87,6 +91,9 @@ export async function buildApp({
     timeWindow: config.rateLimitWindow
   })
   await app.register(websocket)
+  await app.register(multipart, {
+    limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 10 }
+  })
 
   if (database) {
     await authPlugin(app, {
@@ -100,6 +107,9 @@ export async function buildApp({
     await app.register(profileRoutes)
     await app.register(courseRoutes)
     await app.register(assignmentRoutes)
+    await app.register(fileRoutes)
+    await app.register(dialogueRoutes)
+    await app.register(notificationRoutes)
     await app.register(adminRoutes)
     await app.register(teacherRoutes)
     await app.register(appointmentRoutes)
