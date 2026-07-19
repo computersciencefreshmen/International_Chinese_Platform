@@ -1,0 +1,73 @@
+name: international-chinese-platform
+
+services:
+  app:
+    image: ${IMAGE_NAME:-international-chinese-platform:local}
+    build:
+      context: .
+      target: runtime
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-7777}:7777"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 7777
+      DATABASE_PATH: /app/data/platform.db
+      UPLOAD_DIR: /app/uploads
+      DIST_DIR: /app/dist
+      APP_ORIGIN: "${APP_ORIGIN:?Set APP_ORIGIN to the public HTTPS origin}"
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      VERIFICATION_CODE_SECRET: "${VERIFICATION_CODE_SECRET:?Set a stable random verification secret}"
+      SECURE_COOKIES: ${SECURE_COOKIES:-true}
+      ALLOW_BEARER_AUTH: ${ALLOW_BEARER_AUTH:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      LOGGER: ${LOGGER:-true}
+      SEED_ON_START: "false"
+      BODY_LIMIT_BYTES: ${BODY_LIMIT_BYTES:-1048576}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      AI_API_URL: ${AI_API_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+    volumes:
+      - platform-database:/app/data
+      - platform-uploads:/app/uploads
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:7777/api/v1/ready').then((response) => {
+          if (!response.ok) process.exit(1) }).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  platform-database:
+    name: ${DATABASE_VOLUME_NAME:-international-chinese-platform-database}
+  platform-uploads:
+    name: ${UPLOAD_VOLUME_NAME:-international-chinese-platform-uploads}
