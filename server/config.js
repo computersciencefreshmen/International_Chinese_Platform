@@ -64,6 +64,8 @@ export function loadConfig(env = process.env) {
     logger: boolean(env.LOGGER, nodeEnv !== 'test'),
     seedOnStart: boolean(env.SEED_ON_START, nodeEnv !== 'production'),
     smtpUrl: env.SMTP_URL || '',
+    mailFrom:
+      env.MAIL_FROM || 'International Chinese Platform <no-reply@localhost>',
     aiApiUrl: env.AI_API_URL || '',
     aiApiKey: env.AI_API_KEY || '',
     turnUrl: env.TURN_URL || '',

@@ -3,6 +3,8 @@ import { Buffer } from 'node:buffer'
 
 import { z } from 'zod'
 
+import { createMailProvider } from '../services/mail-provider.js'
+
 import {
   hashPassword,
   needsPasswordRehash,
@@ -139,6 +141,10 @@ export async function authRoutes(app) {
   const isProduction = app.config?.isProduction === true
   const verificationSecret =
     app.config?.verificationCodeSecret || 'local-development-only-secret'
+  const mailProvider = createMailProvider({
+    smtpUrl: app.config?.smtpUrl,
+    mailFrom: app.config?.mailFrom
+  })
 
   app.post(
     '/api/v1/auth/verification-code',
@@ -200,8 +206,24 @@ export async function authRoutes(app) {
       })
       replaceCode()
 
-      // A production MailProvider will deliver the code. Local development
-      // intentionally exposes it so the repository remains self-contained.
+      if (isProduction) {
+        try {
+          await mailProvider.sendVerificationCode({ email, code, expiresAt })
+        } catch (error) {
+          db.prepare(
+            `UPDATE verification_codes
+             SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`
+          ).run(new Date().toISOString(), id)
+          request.log.error(
+            { err: error },
+            'Registration verification email delivery failed'
+          )
+          return responseError(reply, 503, '验证码邮件发送失败，请稍后重试')
+        }
+      }
+
+      // Local development intentionally exposes the code so the repository
+      // remains self-contained. Production sends it through SMTP only.
       return responseData(
         reply,
         isProduction ? { expiresAt } : { expiresAt, developmentCode: code },
