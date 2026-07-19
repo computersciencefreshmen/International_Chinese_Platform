@@ -22,6 +22,7 @@ import dialogueRoutes from './routes/dialogues.js'
 import fileRoutes from './routes/files.js'
 import notificationRoutes from './routes/notifications.js'
 import profileRoutes from './routes/profile.js'
+import realtimeRoutes from './routes/realtime.js'
 import teacherRoutes from './routes/teachers.js'
 
 function resolveConfig(overrides = {}) {
@@ -110,6 +111,7 @@ export async function buildApp({
     await app.register(fileRoutes)
     await app.register(dialogueRoutes)
     await app.register(notificationRoutes)
+    await app.register(realtimeRoutes)
     await app.register(adminRoutes)
     await app.register(teacherRoutes)
     await app.register(appointmentRoutes)
