@@ -1,6 +1,6 @@
 # 生产部署与运维手册
 
-本手册面向单机 Docker Compose 生产部署。平台是一个 Vue 3 + Fastify + SQLite 的模块化单体：同一进程提供编译后的前端、`/api/v1` API、`/uploads` 文件和 `/ws` 实时连接。
+本手册面向单机 Docker Compose 生产部署。平台是一个 Vue 3 + Fastify + SQLite 的模块化单体：同一进程提供编译后的前端、`/api/v1` API（包括受权限控制的文件内容）和 `/ws` 实时连接。
 
 > SQLite 部署应始终保持一个应用副本。不要让多个容器通过网络文件系统共享同一数据库。如果需要水平扩展，应先将持久层迁移到适合多实例的数据库。
 
@@ -36,8 +36,13 @@ BIND_ADDRESS=127.0.0.1
 DATABASE_VOLUME_NAME=international-chinese-platform-database
 UPLOAD_VOLUME_NAME=international-chinese-platform-uploads
 
-# 至少 32 字节的稳定随机值；不要在每次发布时更换
-VERIFICATION_CODE_SECRET=replace-with-a-random-secret
+# 默认用户 250 MiB、平台 5 GiB、最多 4 个并发上传；按容量规划调整
+UPLOAD_OWNER_QUOTA_BYTES=262144000
+UPLOAD_TOTAL_QUOTA_BYTES=5368709120
+UPLOAD_MAX_CONCURRENT=4
+
+# 至少 32 个 ASCII 字符的稳定随机值；不要在每次发布时更换
+VERIFICATION_CODE_SECRET=replace-with-at-least-32-random-characters
 
 SESSION_TTL_HOURS=12
 SECURE_COOKIES=true
@@ -190,12 +195,13 @@ docker compose --env-file .env.production up -d
 
 ## 9. 外部适配器与密钥
 
-| 变量                        | 用途           | 运维要求                                              |
-| --------------------------- | -------------- | ----------------------------------------------------- |
-| `VERIFICATION_CODE_SECRET`  | 验证码 HMAC    | 高熵、稳定保存；轮换会使待使用验证码失效              |
-| `SMTP_URL` / `MAIL_FROM`    | 注册邮件       | 生产注册必需；URL 内密码应正确百分号编码              |
-| `AI_API_URL` / `AI_API_KEY` | 服务端 AI 对话 | 只允许 HTTPS 且可信的供应商；确认数据保留条款         |
-| `TURN_URL` / 用户名 / 凭据  | WebRTC 中继    | TURN 凭据会发给授权教室客户端，应限权、轮换并监控流量 |
+| 变量                        | 用途           | 运维要求                                                |
+| --------------------------- | -------------- | ------------------------------------------------------- |
+| `VERIFICATION_CODE_SECRET`  | 验证码 HMAC    | 高熵、稳定保存；轮换会使待使用验证码失效                |
+| `SMTP_URL` / `MAIL_FROM`    | 注册邮件       | 生产注册必需；URL 内密码应正确百分号编码                |
+| `AI_API_URL` / `AI_API_KEY` | 服务端 AI 对话 | 只允许 HTTPS 且可信的供应商；确认数据保留条款           |
+| `TURN_URL` / 用户名 / 凭据  | WebRTC 中继    | TURN 凭据会发给授权教室客户端，应限权、轮换并监控流量   |
+| `UPLOAD_*` 配额与并发       | 上传资源边界   | 按持久卷容量设置平台/用户上限；监控 503、507 与剩余空间 |
 
 外部 AI 未配置时，核心教学工作流仍可运行；TURN 未配置时，直连 WebRTC 可能在严格 NAT 或企业网络中失败。SMTP 未配置时，生产环境不会回传开发验证码，新用户注册将不可用。
 

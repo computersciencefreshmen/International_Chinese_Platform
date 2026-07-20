@@ -49,7 +49,7 @@ Fastify 模块化单体
                          SQLite (WAL)
 ```
 
-开发环境由 Vite 把 `/api`、`/uploads` 和 `/ws` 代理到 API；生产环境由 API 同源托管 `dist/`。外部 AI、SMTP、对象存储和 TURN 均不是核心流程的硬依赖。
+开发环境由 Vite 把 `/api` 和 `/ws` 代理到 Fastify；生产环境由 Fastify 同源托管 `dist/`，文件内容通过受权限控制的 `/api/v1/files/:id/content` 提供。外部 AI、SMTP、对象存储和 TURN 均不是核心流程的硬依赖。
 
 ## 4. 核心领域和状态机
 

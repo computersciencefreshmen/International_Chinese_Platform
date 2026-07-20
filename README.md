@@ -1,171 +1,198 @@
 <a id="readme-top"></a>
 
 <div align="center">
-  <img src="./src/assets/icon/logo.png" alt="International Chinese Platform 标志" width="118" />
+  <img src="./src/assets/icon/logo.png" alt="International Chinese Platform 标志" width="112" />
 
-  <h1>🌏 International Chinese Platform</h1>
+  <h1>International Chinese Platform</h1>
 
-  <p><strong>面向国际中文教育的多角色教学协作平台</strong></p>
-  <p>连接学生学习、教师授课、课程互动、直播课堂与数字人体验的 Vue 3 前端应用。</p>
+  <p><strong>面向国际中文教育的自包含全栈教学协作平台</strong></p>
+  <p>把学生学习、教师授课与平台审核放进同一套可运行、可测试、可部署的教学闭环。</p>
 
   <p>
-    <a href="#-核心功能"><strong>功能概览</strong></a>
+    <a href="#overview"><strong>项目概览</strong></a>
     ·
-    <a href="#-快速开始"><strong>快速开始</strong></a>
+    <a href="#completeness"><strong>完整性定义</strong></a>
+    ·
+    <a href="#quick-start"><strong>快速开始</strong></a>
+    ·
+    <a href="#documentation"><strong>文档</strong></a>
     ·
     <a href="./README.en.md"><strong>English</strong></a>
-    ·
-    <a href="https://github.com/computersciencefreshmen/International_Chinese_Platform/issues"><strong>问题反馈</strong></a>
   </p>
 
   <p>
     <a href="https://github.com/computersciencefreshmen/International_Chinese_Platform/actions/workflows/ci.yml">
       <img alt="CI" src="https://github.com/computersciencefreshmen/International_Chinese_Platform/actions/workflows/ci.yml/badge.svg?branch=main" />
     </a>
-    <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3.5-42b883?logo=vuedotjs&logoColor=white" />
-    <img alt="Vite 6" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white" />
-    <img alt="Pinia 2" src="https://img.shields.io/badge/Pinia-2-FADA5E?logo=pinia&logoColor=1f2937" />
-    <img alt="Tailwind CSS 3" src="https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white" />
-    <img alt="pnpm 8.15.9" src="https://img.shields.io/badge/pnpm-8.15.9-F69220?logo=pnpm&logoColor=white" />
+    <img alt="API tests: 53 passing" src="https://img.shields.io/badge/API_tests-53%2F53_passing-2f855a" />
+    <img alt="Vue 3.5" src="https://img.shields.io/badge/Vue-3.5-42b883?logo=vuedotjs&logoColor=white" />
+    <img alt="Fastify 5" src="https://img.shields.io/badge/Fastify-5-202020?logo=fastify&logoColor=white" />
+    <img alt="SQLite" src="https://img.shields.io/badge/SQLite-WAL-0f80cc?logo=sqlite&logoColor=white" />
+    <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white" />
+    <img alt="pnpm 11.9.0" src="https://img.shields.io/badge/pnpm-11.9.0-f69220?logo=pnpm&logoColor=white" />
+    <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white" />
   </p>
 </div>
 
 ---
 
-## 📖 项目概览
+<a id="overview"></a>
 
-International Chinese Platform 是一个围绕国际中文教学流程构建的多角色前端平台。它不是单页展示模板，而是将学生、教师和管理员工作区组织在同一个 Vue 3 应用中，覆盖课程发现、教师预约、学习需求发布、作业、话轮、直播课堂、数字人课堂、课程上传和平台管理等场景。
+## 项目概览
 
-项目采用角色路由、持久化状态和统一运行时配置，将浏览器端工作流与 REST、话轮生成服务、WebSocket 信令等外部能力解耦，适合作为国际中文教育产品原型、前后端联调基座和持续演进的作品项目。
+International Chinese Platform 是一个围绕真实教学协作流程构建的模块化单体。Vue 3 前端、Fastify API、SQLite 持久层、文件服务和实时课堂协议均位于本仓库；后端入口在 [`server/`](./server/)，所有领域路由由 [`server/app.js`](./server/app.js) 统一注册。项目不依赖早期仓库中可能已经失效或版本不明的外部后端。
 
-> [!IMPORTANT]
-> 本仓库只包含前端应用。登录、注册、验证码、课程、教师、作业、话轮生成及实时课堂的完整生产能力仍需外部后端、信令和媒体基础设施支持。README 会明确区分“已实现的前端能力”“依赖服务的流程”和“原型功能”。
+它覆盖学生、教师和管理员三个工作区，并让课程审核、教师预约与作业评分真正跨角色流转。关键状态保存在数据库中，通知和审计记录随业务事务写入，而不是只在页面中模拟成功。
 
-## ✨ 项目亮点
+> [!NOTE]
+> 本仓库将“完整”定义为：在单实例部署边界内，可以独立安装、迁移、启动、演示、测试和备份核心教学流程。它不是一套宣称具备支付、正式选课、课堂录制和无限水平扩展能力的商业 LMS，也没有虚构在线 Demo 或截图。
 
-- **多角色产品结构** — 学生、教师和管理员拥有独立布局、入口、导航与角色路由守卫，而不是把所有页面堆叠在同一个工作台中。
-- **覆盖教学闭环** — 从课程浏览、教师预约和学习需求，到作业、话轮、直播互动与个人中心，呈现较完整的在线中文教学路径。
-- **实时与数字化教学探索** — 提供摄像头、麦克风、屏幕共享、WebRTC 信令基础、滴滴上课匹配动画和数字人课堂原型。
-- **清晰的服务边界** — REST、话轮服务和 WebSocket 地址全部通过环境变量注入，并在未配置时采用安全的同源回退。
-- **可持续工程基线** — 使用 pnpm 锁定依赖，配备 ESLint、Prettier、生产构建和 GitHub Actions 质量门禁。
-- **可审计的仓库整合** — 三个早期仓库的有效 Git 历史已通过合并提交统一到本仓库，后续开发不再分叉。
+### Portfolio Highlights
 
-## 🎯 核心功能
+- **不是前端壳工程** — 认证、授权、领域 API、迁移、种子数据、上传、邮件适配、WebSocket、测试与生产容器都在同一仓库。
+- **围绕状态闭环建模** — 课程可驳回后修改再审；预约在冲突检查后生成课堂；作业从草稿、提交到评分均受服务端状态机约束。
+- **跨角色数据一致性** — 教师、学生与管理员看到同一份 SQLite 业务数据；通知、审核记录和关键操作日志与状态变更一起持久化。
+- **安全默认值可解释** — 使用服务端不透明会话、HttpOnly Cookie、scrypt 密码哈希、来源检查、角色与所有权校验、速率限制和文件魔数验证。
+- **外部依赖有降级边界** — SMTP、AI 和 TURN 都通过适配器接入；未配置外部 AI 时使用本地确定性对话，核心教学流程仍然可运行。
+- **能进入部署与运维阶段** — 提供有序迁移、一次性管理员引导、多阶段 Docker 镜像、健康探针、持久卷、备份和恢复说明。
 
-### 👨‍🎓 学生学习空间
+<a id="completeness"></a>
 
-- **课程与教师发现** — 浏览课程和教师信息，进入课程、教师详情及预约流程。
-- **教师预约** — 创建预约信息，将浏览器端预约持久化，并在学生首页回显最近预约。
-- **学习需求发布** — 填写学习目标、时间和偏好，形成可继续对接教师的需求草稿。
-- **话轮生成** — 提交关键词并调用独立话轮服务，生成对话练习内容。
-- **作业工作台** — 加载作业、保存浏览器草稿、恢复答案、校验并提交结果。
-- **直播与数字人课堂** — 提供直播课堂媒体控制、滴滴上课匹配交互和数字人教学页面。
-- **个人中心** — 管理个人信息、会员页面、密码入口和消息通知页面。
+## 完整性定义
 
-### 👩‍🏫 教师工作空间
+| 分类          | 状态               | 本仓库的承诺                                                                                                 |
+| ------------- | ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| 核心教学域    | ✅ Complete        | 三角色认证与权限、教师认证、课程审核、预约与课堂、作业提交评分、通知、档案、文件和对话均有前后端实现与持久化 |
+| 工程与运维    | ✅ Complete        | 可复现安装、自动迁移、演示数据、API 测试、生产构建、CI、Docker Compose、健康检查、管理员引导、备份与恢复文档 |
+| SMTP 邮件     | ◇ Conditional      | 本地开发可直接取得开发验证码；开放生产注册时必须配置 `SMTP_URL`、`MAIL_FROM` 和稳定的验证码密钥              |
+| AI 对话       | ◇ Optional adapter | 可调用符合当前 JSON 契约的外部 AI；超时、失败或未配置时回退到本地确定性教学对话                              |
+| TURN 中继     | ◇ Conditional      | 同网段或可直连环境可使用 WebRTC；严格 NAT、企业网络和可靠生产课堂必须配置 TURN                               |
+| 商业 LMS 能力 | — Out of scope     | 支付结算、正式选课与容量扣减、证书颁发方联网核验/OCR、课堂录制、版权工作流、多节点 WebSocket 不在当前范围    |
 
-- **授课工作台** — 组织教师首页、授课对接和课程管理入口。
-- **网络课程与详情** — 浏览教师课程页面并进入课程详情流程。
-- **课程上传原型** — 支持课程资料选择、类型与大小校验、封面预览和浏览器内课程草稿。
-- **教师账户页面** — 提供教师信息与账户相关界面结构。
+价格和容量目前作为课程信息展示，不代表已经实现收费或正式席位占用。在正式选课模型加入前，已发布课程的作业对所有登录学生可见并可提交。SQLite 方案面向单进程、单副本；若要水平扩展，需先迁移持久层与实时房间协调机制。
 
-### 🧭 管理员工作空间
+## 三角色工作区
 
-- **课程对接** — 统一查看平台课程对接入口。
-- **审核中心** — 提供内容审核工作台页面结构。
-- **数据中心** — 展示平台数据看板原型。
-- **账户与消息** — 提供管理员密码和消息通知页面。
+### 学生
 
-### ⚙️ 平台基础能力
+- 注册、登录、恢复会话、维护资料和修改密码。
+- 浏览已发布课程与平台已认证教师的专业档案，创建或取消预约并接收状态通知。
+- 在可加入时间窗内进入课堂，使用聊天、举手和 WebRTC 音视频信令，并可确认完成课堂。
+- 查看已发布作业、保存服务端草稿、提交答案并查看教师评分与反馈。
+- 创建可持久化的中文对话练习；外部 AI 不可用时仍可使用本地教学反馈。
+- 通过通知深链回到对应预约、课堂或作业上下文。
 
-- **角色会话与路由守卫** — 根据登录状态和角色保护学生、教师、管理员路由，并支持登录后回到原目标页面。
-- **持久化状态** — 使用 Pinia 与持久化插件保存前端会话、学生资料和预约数据。
-- **统一网络层** — 使用 Axios 实例、超时配置、响应错误处理和环境化服务地址。
-- **实时通信基础** — 提供 WebSocket 管理以及摄像头、麦克风、屏幕共享和 WebRTC PeerConnection 封装。
-- **国际化基础设施** — 集成 Vue i18n 和语言切换组件，为后续完整多语言覆盖提供基础。
+### 教师
 
-## 👥 角色与入口
+- 维护学校、职称、教龄、专长、语言、教学风格等专业资料。
+- 注册后进入管理员认证队列；已认证教师修改个人或专业资料后会自动回到待审核状态。
+- 创建和编辑课程，提交审核，并根据驳回意见修改后再次提交。
+- 接受或拒绝学生预约；服务端同时检查教师与学生双方的时间冲突。
+- 进入、完成课堂，查看历史消息并参与实时互动。
+- 创建、编辑、发布和关闭作业，查看提交列表并完成评分反馈。
 
-| 角色   | 默认入口                       | 主要任务                                               |
-| ------ | ------------------------------ | ------------------------------------------------------ |
-| 学生   | `/student/home`                | 课程、教师预约、需求发布、作业、话轮、直播和数字人课堂 |
-| 教师   | `/teacher/home`                | 授课对接、网络课程、课程上传、课程详情和账户信息       |
-| 管理员 | `/administrator/courseDocking` | 课程对接、审核、数据中心、账户和消息管理               |
+### 管理员
 
-所有受保护的角色路由都经过前端会话与角色检查。未登录用户会被送回 `/login`，角色不匹配时会回到当前角色的默认首页。
+- 查看待审核课程，批准发布或填写理由驳回。
+- 核验教师提交的机构、职称和证书资料，批准或撤销平台内教师认证并填写审核依据。
+- 查看用户、课程、预约、作业、提交和审核等聚合指标。
+- 查看关键领域操作形成的近期审计活动。
+- 维护自己的会话、密码和通知；首个生产管理员通过一次性命令安全创建。
 
-## 🏗️ 应用架构
+## 四条核心状态闭环
+
+```mermaid
+flowchart TB
+  subgraph Verification["教师认证闭环"]
+    T1["pending · 教师注册或资料变更"] -->|管理员人工核验通过| T2["verified · 可公开展示与预约"]
+    T2 -->|管理员撤销或教师再次修改资料| T1
+  end
+
+  subgraph Course["课程审核闭环"]
+    C1["draft · 教师创建"] -->|提交审核| C2["pending"]
+    C2 -->|管理员通过| C3["published · 学生可见"]
+    C2 -->|管理员驳回并给出理由| C4["rejected"]
+    C4 -->|教师修改并重提| C2
+  end
+
+  subgraph Appointment["预约与课堂闭环"]
+    A1["pending · 学生发起"] -->|教师接受 + 双方冲突检查| A2["accepted + scheduled classroom"]
+    A1 -->|教师拒绝| A3["rejected"]
+    A1 -->|参与者取消| A4["cancelled"]
+    A2 -->|进入时间窗 + 一次性票据| A5["WebSocket / WebRTC classroom"]
+    A2 -->|参与者取消| A4
+    A5 -->|参与者完成课堂| A6["completed + closed classroom"]
+  end
+
+  subgraph Homework["作业提交评分闭环"]
+    H1["draft · 教师编写"] -->|截止时间校验后发布| H2["published"]
+    H2 -->|学生保存| H3["draft submission"]
+    H3 -->|截止前提交| H4["submitted"]
+    H4 -->|教师评分| H5["graded · 分数与反馈"]
+    H2 -->|教师关闭| H6["closed · 禁止新写入"]
+  end
+```
+
+这些转换在服务端校验，并结合事务、唯一约束、通知去重和审计记录防止页面绕过或部分写入。
+
+## 应用架构
 
 ```mermaid
 flowchart LR
-    Login["登录与角色选择"] --> Guard["前端会话与角色路由守卫"]
-    Guard --> Student["学生工作区"]
-    Guard --> Teacher["教师工作区"]
-    Guard --> Admin["管理员工作区"]
+  Browser["浏览器 · 学生 / 教师 / 管理员"] -->|"同源页面与 /api/v1"| App["Fastify 5 · server/app.js"]
+  Browser <-->|"/ws/classroom · ticketed WebSocket"| App
 
-    Student --> State["Pinia 持久化状态"]
-    Teacher --> State
-    Admin --> State
+  App --> Static["生产静态资源 · dist/"]
+  App --> Routes["认证、课程、预约、作业、通知、文件、对话"]
+  App --> Realtime["课堂聊天、在线状态、举手、RTC 信令"]
 
-    Student --> HTTP["Axios / REST"]
-    Teacher --> HTTP
-    Admin --> HTTP
-    Student --> Realtime["WebSocket / WebRTC"]
+  Routes --> DB[("SQLite · WAL + ordered migrations")]
+  Realtime --> DB
+  Routes --> Files["本地持久上传目录"]
 
-    HTTP -. "VITE_API_BASE_URL / VITE_FORUM_API_URL" .-> Services["外部后端服务"]
-    Realtime -. "VITE_WEBSOCKET_URL" .-> Services
+  Routes -. "optional" .-> SMTP["SMTP 邮件"]
+  Routes -. "optional + local fallback" .-> AI["外部 AI"]
+  Realtime -. "strict NAT" .-> TURN["TURN 中继"]
 ```
 
-运行时地址由 `src/config/runtime.js` 统一归一化。未显式设置时，REST 使用同源地址，话轮服务回退到 `/process_words`，WebSocket 根据当前页面自动选择 `ws://` 或 `wss://`。
+开发环境由 Vite 在 `http://localhost:5173` 提供页面，并把 `/api` 和 `/ws` 代理到 `http://127.0.0.1:7777`。生产环境由同一个 Fastify 进程在 `7777` 端口同源托管 `dist/`、`/api/v1`（包括受权限控制的文件内容）和 WebSocket；公网 TLS 应由反向代理终止。
 
-## 📊 功能成熟度
+## 技术栈
 
-| 能力                       | 状态        | 当前边界                                                        |
-| -------------------------- | ----------- | --------------------------------------------------------------- |
-| 多角色布局、路由和前端会话 | ✅ 已实现   | 生产级身份认证、授权和令牌生命周期仍由后端负责                  |
-| 预约、作业和课程上传流程   | 🟡 前端流程 | 预约可本地持久化；作业依赖接口；课程上传目前保存浏览器草稿      |
-| 课程、教师和管理数据       | 🟡 混合状态 | 部分页面请求接口，部分列表与管理看板仍使用静态或演示数据        |
-| 直播课堂媒体控制           | 🧪 原型阶段 | 摄像头、麦克风和屏幕共享可交互；房间信令、TURN 和聊天协议待完善 |
-| 数字人课堂                 | 🧪 原型阶段 | 当前为交互与教学页面原型，尚未接入真实 AI、ASR 或 TTS 服务      |
-| 国际化                     | 🧪 基础设施 | 已有 Vue i18n 和语言切换，绝大多数业务文案仍以中文为主          |
-| 工程质量门禁               | ✅ 已实现   | CI 覆盖安装、ESLint、Prettier 和生产构建；自动化测试待补充      |
+| 层级       | 技术                                                                   |
+| ---------- | ---------------------------------------------------------------------- |
+| Web 客户端 | Vue 3.5、Vite 6、Vue Router 4、Pinia 2                                 |
+| UI 与样式  | Element Plus 2、Tailwind CSS 3、Sass                                   |
+| API        | Fastify 5、Zod 4、Node.js ESM                                          |
+| 数据       | SQLite、better-sqlite3、WAL、有序迁移台账                              |
+| 认证与安全 | scrypt、不透明服务端会话、HttpOnly Cookie、Helmet、Rate Limit          |
+| 实时课堂   | WebSocket、WebRTC 信令、一次性短期课堂票据                             |
+| 外部适配器 | Nodemailer / SMTP、HTTP AI provider、TURN                              |
+| 质量与交付 | Node test runner、ESLint 9、Prettier 3、GitHub Actions、Docker Compose |
 
-## 🛠️ 技术栈
+<a id="quick-start"></a>
 
-| 层级           | 技术                                              |
-| -------------- | ------------------------------------------------- |
-| 前端框架       | Vue 3.5、单文件组件（SFC）                        |
-| 构建工具       | Vite 6                                            |
-| 路由           | Vue Router 4、懒加载嵌套路由、角色守卫            |
-| 状态管理       | Pinia、pinia-plugin-persistedstate                |
-| UI 与样式      | Element Plus、Tailwind CSS 3、PostCSS、Sass       |
-| 网络与实时能力 | Axios、WebSocket、WebRTC                          |
-| 国际化         | Vue i18n                                          |
-| 工程工具       | pnpm 8.15.9、ESLint 9、Prettier 3、GitHub Actions |
-
-## 🚀 快速开始
+## 快速开始
 
 ### 前置要求
 
-- Node.js `>= 18`
-- pnpm `8.15.9`（已在 `package.json` 中固定）
+- 推荐 Node.js 24；`package.json` 的最低版本为 Node.js 22。
+- pnpm `11.9.0`。
+- 如需浏览器 E2E，另需 Python 3.12 与 Playwright Chromium。
 
-### 1. 克隆仓库
+### 1. 克隆与安装
 
 ```bash
 git clone https://github.com/computersciencefreshmen/International_Chinese_Platform.git
 cd International_Chinese_Platform
-```
-
-### 2. 安装依赖
-
-```bash
 corepack enable
-corepack prepare pnpm@8.15.9 --activate
+corepack prepare pnpm@11.9.0 --activate
 pnpm install --frozen-lockfile
 ```
 
-### 3. 配置环境变量
+### 2. 创建本地配置
+
+macOS / Linux：
 
 ```bash
 cp .env.example .env.local
@@ -177,139 +204,262 @@ Windows PowerShell：
 Copy-Item .env.example .env.local
 ```
 
-根据你的后端和信令服务修改 `.env.local`。
+默认配置即可运行本地完整流程；外部 SMTP、AI 和 TURN 均不是本地演示的前置条件。
 
-### 4. 启动开发服务器
+### 3. 初始化演示数据库
+
+```bash
+pnpm db:reset
+```
+
+> [!CAUTION]
+> `db:reset` 会删除 `DATABASE_PATH` 指向的 SQLite 文件及 WAL/SHM 文件，再重建演示数据。只应对本地开发数据库使用；生产发布请运行迁移并先完成备份。
+
+### 4. 启动 Web 与 API
 
 ```bash
 pnpm dev
 ```
 
-打开终端显示的本地地址，默认通常为 `http://localhost:5173`。
+- Web：<http://localhost:5173>
+- API：<http://127.0.0.1:7777/api/v1>
+- 健康检查：<http://127.0.0.1:7777/api/v1/health>
 
-## 🔧 环境变量
+### 演示账号
 
-| 变量                 | 用途                     | 未配置时的代码回退                             |
-| -------------------- | ------------------------ | ---------------------------------------------- |
-| `VITE_API_BASE_URL`  | REST API 根地址          | `/`（当前站点同源）                            |
-| `VITE_FORUM_API_URL` | 关键词生成话轮的完整接口 | `/process_words`                               |
-| `VITE_WEBSOCKET_URL` | 聊天与课堂信令 WebSocket | 当前站点的 `/websocket`，自动选择 `ws` / `wss` |
+| 角色   | 邮箱                  | 密码       | 默认入口                       |
+| ------ | --------------------- | ---------- | ------------------------------ |
+| 学生   | `student@example.com` | `Demo123!` | `/student/home`                |
+| 教师   | `teacher@example.com` | `Demo123!` | `/teacher/home`                |
+| 管理员 | `admin@example.com`   | `Demo123!` | `/administrator/courseDocking` |
 
-`.env.example` 提供了本地开发示例。所有以 `VITE_` 开头的变量都会进入浏览器构建产物，禁止在其中存放密码、私钥或长期有效的服务端密钥。
+这些账号由本地 seed 创建，不能用于生产。生产镜像固定 `SEED_ON_START=false`。
 
-## 📜 常用命令
+## 环境变量
 
-| 命令                | 说明                              |
-| ------------------- | --------------------------------- |
-| `pnpm dev`          | 启动 Vite 开发服务器              |
-| `pnpm build`        | 生成生产构建到 `dist/`            |
-| `pnpm preview`      | 本地预览生产构建                  |
-| `pnpm lint`         | 自动修复可修复的 ESLint 问题      |
-| `pnpm lint:check`   | 只读执行 ESLint 检查              |
-| `pnpm format`       | 格式化 `src/`                     |
-| `pnpm format:check` | 检查 `src/` 的 Prettier 格式      |
-| `pnpm check`        | 依次执行 lint、格式检查和生产构建 |
+完整的本地模板见 [`.env.example`](./.env.example)，生产配置与密钥要求见 [`docs/operations.md`](./docs/operations.md)。
 
-提交代码前建议执行：
+| 变量                                                    | 用途                             | 默认或边界                                                           |
+| ------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`                                     | 浏览器 API 前缀                  | `/api/v1`；推荐保持同源                                              |
+| `HOST` / `PORT`                                         | API 监听地址与端口               | `127.0.0.1` / `7777`                                                 |
+| `DATABASE_PATH`                                         | SQLite 文件                      | `.data/platform.db`                                                  |
+| `UPLOAD_DIR`                                            | 上传文件目录                     | `.data/uploads`                                                      |
+| `UPLOAD_OWNER_QUOTA_BYTES` / `UPLOAD_TOTAL_QUOTA_BYTES` | 用户与平台上传总配额             | 默认 250 MiB / 5 GiB；单实例内原子预留                               |
+| `UPLOAD_MAX_CONCURRENT`                                 | 全局并发上传槽位                 | 默认 `4`，最大 `32`                                                  |
+| `APP_ORIGIN`                                            | 允许携带 Cookie 写请求的精确来源 | 开发为 `http://localhost:5173`；生产必须是公网 HTTPS origin          |
+| `SESSION_TTL_HOURS`                                     | 会话有效期                       | `12`                                                                 |
+| `VERIFICATION_CODE_SECRET`                              | 注册验证码 HMAC 密钥             | 生产必须设置高熵、稳定值                                             |
+| `SMTP_URL` / `MAIL_FROM`                                | 注册验证码邮件                   | 生产开放注册时必需                                                   |
+| `AI_API_URL` / `AI_API_KEY`                             | 可选外部对话生成器               | 未配置或失败时使用本地确定性实现                                     |
+| `TURN_URL` / `TURN_USERNAME` / `TURN_CREDENTIAL`        | 可选 WebRTC 中继                 | 严格 NAT 和可靠生产课堂需要                                          |
+| `SEED_ON_START`                                         | 启动时写入演示数据               | 开发默认开启；生产 Compose 固定关闭                                  |
+| `SECURE_COOKIES` / `ALLOW_BEARER_AUTH` / `TRUST_PROXY`  | Cookie、Bearer 兼容与代理边界    | 生产 Compose 启用 Secure Cookie、关闭 Bearer；代理信任必须按拓扑设置 |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_DISPLAY_NAME` | 一次性首个管理员引导             | 只在运行引导命令时临时注入，不应保存在生产环境文件                   |
+
+所有 `VITE_` 变量会进入浏览器构建产物，禁止在其中存放密钥。生产注册必须同时具备 SMTP 和验证码密钥；开发模式在未配置 SMTP 时会返回仅供本机测试的验证码。
+
+## 数据库迁移与管理员引导
+
+数据库打开时会读取 `schema_migrations` 台账，并在事务中依次应用 [`server/db/database.js`](./server/db/database.js) 中的迁移。也可以显式执行：
+
+```bash
+pnpm db:migrate
+```
+
+生产环境不创建演示管理员。首次部署后，临时注入 `ADMIN_EMAIL`、`ADMIN_PASSWORD` 和 `ADMIN_DISPLAY_NAME`，再执行：
+
+```bash
+pnpm admin:bootstrap
+```
+
+管理员密码必须至少 12 位，并包含大写字母、小写字母、数字和特殊字符。命令只允许创建首个管理员；检测到已有管理员时会拒绝覆盖。Docker 中的安全注入方式、备份、迁移与恢复流程见[运维手册](./docs/operations.md)。
+
+## 测试与质量门禁
+
+```bash
+pnpm test:api
+pnpm check
+```
+
+| 层级         | 当前覆盖                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| API 集成测试 | **53 / 53 通过**；覆盖认证、教师审核、课程、预约与课堂、作业、迁移、邮件、流式上传与配额、通知、资料、对话和实时房间隔离 |
+| 浏览器 E2E   | **4 条跨角色流程通过**；真实 UI 登录三个角色，验证教师认证撤销/恢复、课程审核、预约/课堂完成、作业提交/评分              |
+| 静态质量     | `pnpm check` 依次运行 ESLint、Prettier、API 测试和生产构建                                                               |
+| 持续集成     | 独立 Validate 与 Cross-role browser E2E 任务；Node 24、pnpm 11.9.0、Python 3.12、冻结锁文件和隔离数据库                  |
+
+浏览器测试使用锁定版本的 Python Playwright。先安装测试依赖并构建生产前端：
+
+```bash
+python -m pip install --requirement e2e/requirements.txt
+python -m playwright install chromium
+pnpm build
+```
+
+在第一个终端启动隔离的生产模式服务。macOS / Linux：
+
+```bash
+mkdir -p .data
+rm -f .data/e2e.db .data/e2e.db-shm .data/e2e.db-wal
+NODE_ENV=production \
+SEED_ON_START=true \
+SECURE_COOKIES=false \
+APP_ORIGIN=http://localhost:7777 \
+VERIFICATION_CODE_SECRET=e2e-only-verification-secret-32-characters \
+DATABASE_PATH=.data/e2e.db \
+pnpm start
+```
+
+Windows PowerShell：
+
+```powershell
+New-Item -ItemType Directory -Force .data | Out-Null
+Remove-Item -Force -ErrorAction SilentlyContinue .data/e2e.db, .data/e2e.db-shm, .data/e2e.db-wal
+$env:NODE_ENV = 'production'
+$env:SEED_ON_START = 'true'
+$env:SECURE_COOKIES = 'false'
+$env:APP_ORIGIN = 'http://localhost:7777'
+$env:VERIFICATION_CODE_SECRET = 'e2e-only-verification-secret-32-characters'
+$env:DATABASE_PATH = '.data/e2e.db'
+pnpm start
+```
+
+在第二个终端执行：
+
+```bash
+python e2e/test_workflows.py
+```
+
+脚本默认访问 `http://localhost:7777`；可通过 `E2E_BASE_URL` 改写地址，通过 `E2E_BROWSER_EXECUTABLE` 使用本机 Chrome。失败时截图、trace 和浏览器日志写入 `test-results/e2e/`。CI 会自行构建、安装 Chromium、启动独立 seed 数据库并上传失败产物。
+
+API 测试使用临时数据库，不依赖演示数据库。仓库当前不宣称存在公开托管的 Demo；可复现验证入口是本地启动、自动测试和 Docker 部署。
+
+## Docker 同源部署
+
+生产镜像由 Node 24 多阶段构建生成，并以非 root 用户运行。准备好受限制的 `.env.production` 后：
+
+```bash
+docker compose --env-file .env.production build --pull
+docker compose --env-file .env.production up -d
+docker compose --env-file .env.production ps
+```
+
+Compose 默认只把应用发布到宿主机 `127.0.0.1:7777`，并将数据库和上传分别放入持久卷。反向代理必须让页面、`/api/v1`、上传文件和 `/ws` 共享同一公网 origin；不要把 API 单独暴露到另一个域名。
+
+上线前请完整阅读[生产部署与运维手册](./docs/operations.md)。其中包含 TLS 代理示例、管理员引导、迁移、冷备份、恢复演练、监控和事故处理，而不把“构建成功”等同于“生产就绪”。
+
+## 项目结构
+
+```text
+International_Chinese_Platform/
+├── src/                         # Vue 3 客户端与三个角色工作区
+│   ├── api/                     # 同源 API 调用
+│   ├── components/              # 账户、服务与基础组件
+│   ├── router/                  # 会话恢复与角色路由守卫
+│   ├── stores/                  # Pinia 状态
+│   └── views/                   # 学生、教师、管理员与课堂页面
+├── server/                      # Fastify 后端（不是外部依赖）
+│   ├── app.js                   # 应用组合根与全部路由注册
+│   ├── routes/                  # 认证及领域 API / WebSocket
+│   ├── db/                      # Schema、迁移、seed、reset、管理员引导
+│   ├── services/                # SMTP 与 AI 适配器
+│   └── test/                    # 53 项 API 集成测试
+├── e2e/                         # Python Playwright 跨角色浏览器测试
+├── docs/
+│   ├── adr/                     # 架构决策记录
+│   ├── plans/                   # 完整化设计与实施计划
+│   └── operations.md            # 生产部署、备份与恢复
+├── .github/workflows/ci.yml     # 质量门禁与浏览器 E2E
+├── Dockerfile                   # Node 24 多阶段生产镜像
+├── docker-compose.yml           # 单实例、双持久卷部署
+├── SECURITY.md                  # 漏洞报告与安全期望
+└── .env.example                 # 本地配置模板
+```
+
+## API 分组
+
+所有 REST 接口使用 `/api/v1` 前缀，并返回统一的 `{ code, msg, data }` 结构。实现以 [`server/app.js`](./server/app.js) 的注册列表为准。
+
+| 分组                      | 主要路径                                                                                    | 能力                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| System                    | `/health`, `/ready`                                                                         | 存活与数据库就绪检查                            |
+| Auth                      | `/auth/verification-code`, `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/session` | 验证码、账号与会话生命周期                      |
+| Profile & Teachers        | `/me`, `/me/password`, `/teachers`                                                          | 个人资料、教师专业档案与发现                    |
+| Courses & Admin           | `/courses`, `/admin/course-reviews`, `/admin/teacher-verifications`, `/admin/metrics`       | 课程 CRUD、课程与教师审核、运营指标             |
+| Appointments & Classrooms | `/appointments`, `/classrooms/:id/*`                                                        | 预约响应、冲突校验、加入信息、完成课堂          |
+| Assignments               | `/courses/:id/assignments`, `/assignments`, `/submissions`, `/me/submissions`               | 作业生命周期、学生提交与教师评分                |
+| Files                     | `/files`, `/files/:id/content`                                                              | 分类上传、内容校验、元数据与删除                |
+| Dialogues                 | `/dialogues`, `/dialogues/:id/messages`                                                     | 持久化对话生成与继续练习                        |
+| Notifications             | `/notifications`                                                                            | 分页、未读状态与全部已读                        |
+| Realtime                  | `/classrooms/:id/ticket`, `/classrooms/:id/messages`, `/ws/classroom`                       | 一次性票据、历史消息、在线状态、聊天与 RTC 信令 |
+
+## 安全设计
+
+- 密码使用参数化 scrypt 哈希；登录路径执行无用户差异的密码校验以降低枚举信号。
+- 浏览器只持有 HttpOnly、SameSite 会话 Cookie；数据库保存不透明令牌的摘要，登出、改密和过期均会撤销会话。
+- Cookie 写请求校验 `Origin`，生产 Compose 默认启用 Secure Cookie 并关闭 Bearer 认证。
+- 领域写操作按角色和资源关系授权，业务状态转换在服务端再次检查；非公开文件的内容、元数据和删除均限 owner/admin。
+- 未认证教师不会进入公开发现且不能被预约；管理员的批准/撤销会通知教师并写审计，教师修改资料会自动回到待审核状态。
+- Zod 校验输入；Helmet 设置安全响应头；Fastify 对请求和敏感接口执行速率限制。
+- 上传采用私有临时文件流式落盘、增量哈希、签名字节校验和同卷原子改名，并执行角色、大小、用户/平台配额与全局并发限制；这不是恶意内容扫描。
+- 验证码以摘要保存、限制尝试次数并一次性消费；邮件发送失败不会创建可用注册流程。
+- 关键审核、预约、作业和管理员引导操作写入审计日志。
+
+课堂票据签发、握手、历史读取、每个实时事件以及周期性连接清理都会重新校验会话、账号、课堂状态和参与者关系；权限失效的连接会被关闭。非公开课程视频和材料当前只允许 owner/admin 读取；由于正式选课不在本项目范围内，尚未建立学生的课程资料授权关系。需要分发私有课程资料的部署，应先补充选课或资源授权模型。
+
+这些措施不等于第三方安全认证。部署者仍需管理 TLS、密钥、依赖更新、日志、数据保留和备份访问。漏洞请按 [`SECURITY.md`](./SECURITY.md) 私密报告，不要在公开 Issue 中披露细节。
+
+## 生产边界
+
+| 边界     | 当前设计                                                         | 扩展方向                                                    |
+| -------- | ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| 数据库   | SQLite WAL，单应用副本                                           | 多实例前迁移到服务型数据库并重新评估事务与迁移策略          |
+| 实时课堂 | 单进程 WebSocket 房间，WebRTC 点对点媒体                         | 多节点需要共享 presence/pub-sub、粘性路由和独立媒体基础设施 |
+| 网络穿透 | TURN 为可选配置                                                  | 严格 NAT 或企业网络的生产课堂必须提供受监控的 TURN          |
+| 文件     | 本地持久卷；默认用户 250 MiB、平台 5 GiB、4 个并发上传槽位       | 大规模部署可迁移对象存储并补充扫描、生命周期与 CDN          |
+| 邮件     | SMTP 适配器                                                      | 生产注册必须配置可交付的邮件服务并监控失败率                |
+| AI       | 单一 HTTP 适配器 + 本地确定性降级                                | 可增加供应商策略、成本控制、内容安全和可观测性              |
+| 教学商务 | 平台内管理员教师认证；价格与容量仍是资料字段                     | 支付、正式选课及证书颁发方联网核验/OCR 需独立领域设计       |
+| 课堂媒体 | 实时音视频与信令                                                 | 录制、转码、回放和内容审核不在当前实现中                    |
+| 持续授权 | 票据、握手、每个事件及周期清理均复验权限；私有材料限 owner/admin | 多实例时增加共享撤权信号，并补充基于选课关系的学生资料权限  |
+
+<a id="documentation"></a>
+
+## 文档索引
+
+- [`README.md`](./README.md) — 中文主文档。
+- [`README.en.md`](./README.en.md) — 等价英文文档。
+- [`docs/operations.md`](./docs/operations.md) — Docker 生产部署、反向代理、迁移、备份、恢复与监控。
+- [`SECURITY.md`](./SECURITY.md) — 漏洞报告流程与部署安全期望。
+- [`docs/adr/0001-self-contained-modular-monolith.md`](./docs/adr/0001-self-contained-modular-monolith.md) — 自包含模块化单体决策。
+- [`docs/adr/0002-server-side-opaque-sessions.md`](./docs/adr/0002-server-side-opaque-sessions.md) — 服务端不透明会话决策。
+- [`docs/plans/2026-07-19-full-stack-completion-design.md`](./docs/plans/2026-07-19-full-stack-completion-design.md) — 完整化设计说明。
+- [`docs/plans/2026-07-19-full-stack-completion.md`](./docs/plans/2026-07-19-full-stack-completion.md) — 实施计划与验收范围。
+
+## 唯一主仓库
+
+本项目后续代码、Issue、文档与发布只以以下仓库为准：
+
+> [computersciencefreshmen/International_Chinese_Platform](https://github.com/computersciencefreshmen/International_Chinese_Platform)
+
+早期历史曾分散在 [`vue3-project-initialization`](https://github.com/computersciencefreshmen/vue3-project-initialization) 和一个名为 `project` 的仓库；后者当前已无法从 GitHub 访问，因此不再保留失效链接。有效历史已经合并到当前仓库；可访问的旧仓库只作为历史参考，不应继续接收功能提交。
+
+## 参与开发
+
+从最新 `main` 创建聚焦分支，修改功能时同步更新测试和文档。提交前运行：
 
 ```bash
 pnpm check
 ```
 
-## 📁 项目结构
+Pull Request 应在 CI 通过后合并回 `main`，不要让功能长期停留在个人分支。
 
-```text
-International_Chinese_Platform/
-├── .github/
-│   └── workflows/ci.yml      # GitHub Actions 质量门禁
-├── public/                   # 公共静态资源
-├── src/
-│   ├── api/                  # 学生、用户与通用 API 封装
-│   ├── assets/               # 样式、图标与课程媒体
-│   ├── components/           # 基础组件、领域组件与滴滴上课组件
-│   ├── config/               # REST / Forum / WebSocket 运行时配置
-│   ├── i18n/                 # 国际化实例与中英文词条
-│   ├── router/               # 多角色嵌套路由和守卫
-│   ├── stores/               # Pinia 会话、学生与管理员状态
-│   ├── utils/                # Axios 与 WebSocket 工具
-│   └── views/
-│       ├── student/          # 学生端页面
-│       ├── teacher/          # 教师端页面
-│       ├── administrator/    # 管理员端页面
-│       ├── liveClass/        # 直播课堂与 WebRTC 组合式函数
-│       └── login/            # 登录与注册界面
-├── .env.example              # 本地服务地址示例
-├── package.json              # 脚本、依赖和运行时要求
-├── pnpm-lock.yaml            # 可复现依赖锁文件
-└── vite.config.js            # Vite 配置
-```
+## 许可证
 
-## ✅ 质量保障
-
-| 层级       | 门禁                                                     |
-| ---------- | -------------------------------------------------------- |
-| 静态质量   | ESLint 只读检查                                          |
-| 格式一致性 | Prettier 检查                                            |
-| 可构建性   | Vite 生产构建                                            |
-| 持续集成   | Ubuntu + Node.js 20 + pnpm 8.15.9 + frozen lockfile      |
-| 浏览器验证 | 关键登录、角色重定向、学生首页和数字人路由的人工冒烟检查 |
-
-GitHub Actions 会在 Pull Request 以及推送到 `main` 时运行同一套安装、检查和构建流程。项目目前尚未配置自动化单元、组件或端到端测试，因此关键业务改动仍应补充浏览器验证。
-
-## 🔗 仓库整合
-
-本仓库是项目唯一的主维护仓库：
-
-> [computersciencefreshmen/International_Chinese_Platform](https://github.com/computersciencefreshmen/International_Chinese_Platform)
-
-项目早期代码曾分散在：
-
-- [computersciencefreshmen/vue3-project-initialization](https://github.com/computersciencefreshmen/vue3-project-initialization)
-- [computersciencefreshmen/project](https://github.com/computersciencefreshmen/project)
-
-旧仓库的有效提交历史已通过标准 Git 合并提交进入当前 `main`，包括原本无共同祖先的初始化历史。后续代码、Issue、文档和发布均应以本仓库为准；旧仓库只作为历史参考。
-
-## 🗺️ 路线图
-
-- [x] 统一三个仓库历史和主维护入口
-- [x] 建立学生、教师、管理员三端路由结构
-- [x] 统一 REST、话轮服务和 WebSocket 运行时配置
-- [x] 建立 ESLint、Prettier、生产构建和 GitHub Actions 门禁
-- [ ] 对齐完整后端契约，将静态课程、教师和管理数据替换为真实数据
-- [ ] 完成 WebRTC 房间、信令、TURN 和课堂聊天协议
-- [ ] 接入真实数字人、AI、ASR 与 TTS 服务
-- [ ] 完成全量中英文界面国际化
-- [ ] 增加单元、组件和端到端自动化测试
-- [ ] 补充生产部署、监控、安全基线和开源许可证
-
-## 🚢 部署说明
-
-```bash
-pnpm build
-```
-
-生产构建输出到 `dist/`。部署时需要：
-
-1. 在构建阶段注入正确的 `VITE_*` 环境变量。
-2. 为 Vue Router history 模式配置 SPA 回退，将未知路由返回 `index.html`。
-3. 使用 HTTPS，并为实时服务使用 WSS；同时正确配置后端 CORS。
-4. 为生产直播课堂提供经过认证的信令服务、TURN 服务和媒体安全策略。
-5. 在发布前联调登录、课程、作业、话轮和实时课堂的完整端到端流程。
-
-## 🤝 参与贡献
-
-欢迎通过 Issue 和 Pull Request 改进项目：
-
-1. 从最新 `main` 创建语义清晰的功能分支。
-2. 保持改动聚焦，并同步更新相关文档。
-3. 提交前运行 `pnpm check`。
-4. 创建 Pull Request，等待 CI 通过后使用标准合并提交并入 `main`。
-
-## 📄 许可证
-
-本仓库目前尚未声明开源许可证。在添加明确许可证之前，请不要假定代码已获得自由复制、分发或商用授权。
+本仓库目前**没有声明开源许可证**。在仓库所有者添加明确许可证之前，请不要假定代码已被授权复制、分发、修改或用于商业用途。
 
 <div align="center">
-  <p>Built with ❤️ for international Chinese education.</p>
-  <a href="#readme-top">⬆ 回到顶部</a>
+  <p>Built for complete, inspectable international Chinese teaching workflows.</p>
+  <a href="#readme-top">返回顶部</a>
 </div>
