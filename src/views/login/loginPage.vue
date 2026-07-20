@@ -9,10 +9,6 @@ import logoComponent from '@/components/service/logoComponent.vue' //引入自�
 import LanguageToggle from '@/components/service/LanguageToggle.vue' //引入自定义语言切换组件
 import { ElMessage } from 'element-plus' //引入element-plus的消息提示组件
 
-//引入api接口
-import { studentLogin } from '@/api/student.js'
-import { loginByRole } from '@/api/user.js'
-
 //引入路由
 import { useRouter } from 'vue-router'
 const router = useRouter()
@@ -70,34 +66,34 @@ const handleLogin = async () => {
 
   isSubmitting.value = true
   try {
-    const response =
-      selectedRole.value === 'student'
-        ? await studentLogin(formData.value.email, formData.value.password)
-        : await loginByRole(
-            selectedRole.value,
-            formData.value.email,
-            formData.value.password
-          )
+    const profile = await userStore.login({
+      role: selectedRole.value,
+      email: formData.value.email.trim(),
+      password: formData.value.password
+    })
 
-    if (response.data?.code !== 0) {
-      throw new Error(response.data?.msg || '登录失败，请检查账号信息')
-    }
+    if (!profile) throw new Error('服务端未返回有效用户信息')
 
-    const profile = response.data.data || {}
-    userStore.setSession(selectedRole.value, profile)
     if (selectedRole.value === 'student') {
       studentStore.setUserInfo(profile)
+    } else {
+      studentStore.clearUserInfo()
     }
 
     ElMessage.success('登录成功')
     const requestedPath = router.currentRoute.value.query.redirect
-    await router.replace(
-      typeof requestedPath === 'string'
+    const safeRequestedPath =
+      typeof requestedPath === 'string' &&
+      requestedPath.startsWith('/') &&
+      !requestedPath.startsWith('//')
         ? requestedPath
-        : roleRoutes[selectedRole.value]
-    )
+        : null
+
+    await router.replace(safeRequestedPath || roleRoutes[selectedRole.value])
   } catch (error) {
-    ElMessage.error(error.response?.data?.msg || error.message || '登录失败')
+    if (!error.messageShown) {
+      ElMessage.error(error.response?.data?.msg || error.message || '登录失败')
+    }
   } finally {
     isSubmitting.value = false
   }

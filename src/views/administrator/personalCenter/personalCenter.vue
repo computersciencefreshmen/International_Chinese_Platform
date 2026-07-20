@@ -9,12 +9,12 @@ const routerList = [
   {
     id: 1,
     name: '修改密码',
-    path: '/administrator/personalCenter/changePassword'
+    path: '/administrator/center/changePasswordAdmin'
   },
   {
     id: 2,
     name: '消息通知',
-    path: '/administrator/personalCenter/message'
+    path: '/administrator/center/AdminMessage'
   }
 ]
 </script>

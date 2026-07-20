@@ -42,13 +42,6 @@ const router = createRouter({
             import('@/views/student/orderTeacher/orderTeacher.vue')
         },
         {
-          // 学生发布预约模块
-          path: 'publish',
-          name: 'publishOrder',
-          component: () =>
-            import('@/views/student/publishOrder/publishOrder.vue')
-        },
-        {
           // 学生网络课程模块
           path: 'course',
           name: 'onlineCourse',
@@ -71,13 +64,6 @@ const router = createRouter({
               name: 'personalInfo',
               component: () =>
                 import('@/views/student/personalCenter/personalInfo.vue')
-            },
-            {
-              // 会员信息模块
-              path: 'vip',
-              name: 'vipInfo',
-              component: () =>
-                import('@/views/student/personalCenter/vipInfo.vue')
             },
             {
               // 修改密码模块
@@ -115,20 +101,6 @@ const router = createRouter({
             import('@/views/student/orderTeacher/teacherDetail.vue')
         },
         {
-          //创建新的话轮并预约老师
-          path: 'createNewChat',
-          name: 'createNewChat',
-          component: () =>
-            import('@/views/student/orderTeacher/createNewChat.vue')
-        },
-        {
-          // 创建新的发布预约
-          path: 'createNewPublish',
-          name: 'createNewPublish',
-          component: () =>
-            import('@/views/student/publishOrder/CreateNewPublish.vue')
-        },
-        {
           path: 'liveClass',
           name: 'liveClass',
           component: () => import('@/views/liveClass/liveClass.vue')
@@ -159,9 +131,7 @@ const router = createRouter({
           path: 'teachingDocking',
           name: 'teachingDocking',
           component: () =>
-            import(
-              '@/views/teacher/TeachingDockingPage/teachingDockingPage.vue'
-            )
+            import('@/views/teacher/TeachingDockingPage/teachingDockingPage.vue')
         },
         // 网络课程模块
         {
@@ -190,15 +160,18 @@ const router = createRouter({
           name: 'courseDetails',
           component: () =>
             import('@/views/teacher/CourseDetailsPage/CourseDetailsPage.vue')
+        },
+        {
+          path: 'liveClass',
+          name: 'teacherLiveClass',
+          component: () => import('@/views/liveClass/liveClass.vue')
         }
       ]
     },
     {
       path: '/administrator',
       component: () =>
-        import(
-          '@/views/administrator/administratorLayout/administratorLayout.vue'
-        ),
+        import('@/views/administrator/administratorLayout/administratorLayout.vue'),
       meta: { requiresAuth: true, role: 'administrator' },
       redirect: '/administrator/courseDocking', // 重定向到首页
       children: [
@@ -238,9 +211,7 @@ const router = createRouter({
               path: 'changePasswordAdmin',
               name: 'changePasswordAdmin',
               component: () =>
-                import(
-                  '@/views/administrator/personalCenter/changePassword.vue'
-                )
+                import('@/views/administrator/personalCenter/changePassword.vue')
             },
             {
               // 消息通知模块
@@ -260,14 +231,20 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const userStore = useUserStore()
   const studentStore = useStudentStore()
-  const studentInfo = studentStore.getUserInfo()
-  const token = userStore.token || studentInfo?.token
-  const currentRole = userStore.role || (studentInfo?.token ? 'student' : null)
+  await userStore.restoreSession()
 
-  if (to.path === '/login' && token && currentRole) {
+  const currentRole = userStore.role
+
+  if (userStore.isAuthenticated && currentRole === 'student') {
+    studentStore.setUserInfo(userStore.profile)
+  } else {
+    studentStore.clearUserInfo()
+  }
+
+  if (to.path === '/login' && userStore.isAuthenticated && currentRole) {
     return roleHome[currentRole] || '/login'
   }
 
@@ -276,7 +253,7 @@ router.beforeEach((to) => {
     return true
   }
 
-  if (!token || !currentRole) {
+  if (!userStore.isAuthenticated || !currentRole) {
     return {
       path: '/login',
       query: { redirect: to.fullPath }
@@ -290,5 +267,32 @@ router.beforeEach((to) => {
 
   return true
 })
+
+let unauthorizedRedirectInProgress = false
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:unauthorized', async () => {
+    if (unauthorizedRedirectInProgress) return
+
+    unauthorizedRedirectInProgress = true
+    try {
+      const userStore = useUserStore()
+      const studentStore = useStudentStore()
+      const currentRoute = router.currentRoute.value
+
+      userStore.clearSession()
+      studentStore.clearUserInfo()
+
+      if (currentRoute.path !== '/login') {
+        await router.replace({
+          path: '/login',
+          query: { redirect: currentRoute.fullPath }
+        })
+      }
+    } finally {
+      unauthorizedRedirectInProgress = false
+    }
+  })
+}
 
 export default router

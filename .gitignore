@@ -8,11 +8,20 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.pnpm-store/
 .DS_Store
 dist
 dist-ssr
 coverage
 *.local
+.env
+.env.*
+!.env.example
+.data/
+playwright-report/
+test-results/
+__pycache__/
+*.py[cod]
 
 /cypress/videos/
 /cypress/screenshots/

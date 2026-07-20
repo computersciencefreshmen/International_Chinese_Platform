@@ -1,419 +1,590 @@
+<script setup>
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import teacherAvatar from '@/assets/icon/teacher.png'
+import studentAvatar from '@/assets/student/avatar.png'
+import {
+  createDialogue,
+  getDialogue,
+  getDialogues,
+  sendDialogueMessage
+} from '@/api/platform'
+
+const route = useRoute()
+const router = useRouter()
+const session = ref(null)
+const loading = ref(true)
+const sending = ref(false)
+const listening = ref(false)
+const autoSpeak = ref(true)
+const message = ref('')
+const errorMessage = ref('')
+const transcript = ref(null)
+const stage = ref(null)
+
+const SpeechRecognition =
+  typeof window === 'undefined'
+    ? null
+    : window.SpeechRecognition || window.webkitSpeechRecognition
+const canListen = computed(() => Boolean(SpeechRecognition))
+
+async function scrollToBottom() {
+  await nextTick()
+  stage.value?.scrollTo({ top: stage.value.scrollHeight, behavior: 'smooth' })
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return
+  window.speechSynthesis.cancel()
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.lang = 'zh-CN'
+  utterance.rate = 0.86
+  utterance.pitch = 1.02
+  window.speechSynthesis.speak(utterance)
+}
+
+async function loadSession() {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    let sessionId = route.query.dialogueId
+    if (!sessionId) {
+      const data = await getDialogues({ page: 1, pageSize: 1 })
+      sessionId = data.items[0]?.id
+    }
+    if (!sessionId) {
+      const created = await createDialogue({
+        title: '餐厅点餐沉浸练习',
+        keywords: ['点餐', '餐厅', '价格']
+      })
+      sessionId = created.id
+    }
+    session.value = await getDialogue(sessionId)
+    await router.replace({ query: { dialogueId: sessionId } })
+    await scrollToBottom()
+  } catch (error) {
+    errorMessage.value = error?.response?.data?.msg || '沉浸课堂加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function send() {
+  const content = message.value.trim()
+  if (!content || sending.value || !session.value) return
+  sending.value = true
+  message.value = ''
+  try {
+    const data = await sendDialogueMessage(session.value.id, content)
+    session.value.turns.push(...data.turns)
+    session.value.provider = data.provider
+    await scrollToBottom()
+    const tutorReply = data.turns.findLast((turn) => turn.speaker === 'tutor')
+    if (autoSpeak.value && tutorReply) speak(tutorReply.content)
+  } catch (error) {
+    message.value = content
+    ElMessage.error(error?.response?.data?.msg || '发送失败')
+  } finally {
+    sending.value = false
+  }
+}
+
+function startListening() {
+  if (!SpeechRecognition || listening.value) return
+  transcript.value = new SpeechRecognition()
+  transcript.value.lang = 'zh-CN'
+  transcript.value.interimResults = false
+  transcript.value.maxAlternatives = 1
+  transcript.value.onstart = () => {
+    listening.value = true
+  }
+  transcript.value.onresult = (event) => {
+    message.value = event.results[0][0].transcript
+  }
+  transcript.value.onerror = () => {
+    ElMessage.info('没有识别到语音，请重试或直接输入')
+  }
+  transcript.value.onend = () => {
+    listening.value = false
+    transcript.value = null
+  }
+  transcript.value.start()
+}
+
+onMounted(loadSession)
+onBeforeUnmount(() => {
+  transcript.value?.abort()
+  window.speechSynthesis?.cancel()
+})
+</script>
+
 <template>
-  <div class="digital-human-page">
-    <!-- 顶部栏 -->
-    <div class="header-bar">
-      <router-link to="/student/home" class="back-btn">返回首页</router-link>
-      <div class="user-info">
-        <img src="@/assets/student/avatar.png" class="user-avatar" />
-        <span class="user-name">Kimberly</span>
+  <div class="immersion-room">
+    <header class="room-header">
+      <button type="button" @click="router.push('/student/chatTurn')">
+        ← 返回对话实验室
+      </button>
+      <div class="room-status">
+        <span class="live-dot"></span>
+        <strong>ICE 数字助教</strong>
+        <small>{{
+          session?.provider === 'external' ? 'AI ONLINE' : 'LOCAL MODE'
+        }}</small>
       </div>
-    </div>
-    <!-- 数字人问答对话区 -->
-    <div class="qa-dialog-area">
-      <div class="qa-dialog-list">
-        <div v-for="(item, idx) in qaHistory" :key="idx" class="qa-dialog-item">
-          <div class="qa-bubble user-bubble">
-            <img src="@/assets/student/avatar.png" class="bubble-avatar" />
-            <span>{{ item.q }}</span>
-          </div>
-          <div class="qa-bubble digital-bubble">
-            <img src="@/assets/icon/teacher.png" class="bubble-avatar" />
-            <span>{{ item.a }}</span>
-          </div>
+      <el-switch v-model="autoSpeak" active-text="自动朗读" />
+    </header>
+
+    <el-skeleton v-if="loading" class="room-loading" :rows="10" animated />
+    <el-result v-else-if="errorMessage" icon="error" :title="errorMessage">
+      <template #extra>
+        <el-button type="primary" @click="loadSession">重新进入</el-button>
+      </template>
+    </el-result>
+    <main v-else class="room-grid">
+      <section class="avatar-stage">
+        <div class="orbital orbital-one"></div>
+        <div class="orbital orbital-two"></div>
+        <div class="avatar-frame">
+          <img :src="teacherAvatar" alt="ICE 数字助教" />
         </div>
-      </div>
-      <div class="qa-input-bar">
-        <el-input
-          v-model="qaInput"
-          placeholder="向数字人提问..."
-          class="qa-input"
-          @keyup.enter="askDigitalHuman"
-        />
-        <el-button class="qa-btn" type="primary" @click="askDigitalHuman">
-          <span class="btn-gradient-text">提问</span>
-        </el-button>
-      </div>
-    </div>
-    <div class="main-content">
-      <!-- 左侧内容区 -->
-      <div class="left-content">
-        <el-card class="box-card">
-          <template #header>
-            <span>数字人学习课堂</span>
-          </template>
-          <div class="lesson-title">点餐用语对话</div>
-          <div class="dialog-content">
-            <div
-              v-for="(line, idx) in dialogLines"
-              :key="idx"
-              class="dialog-line"
-            >
-              <span @click="digitalHumanRead(line)" class="dialog-clickable">{{
-                line
-              }}</span>
+        <p>ICE / 国际中文数字助教</p>
+        <h1>{{ session.title }}</h1>
+        <div class="keywords">
+          <span v-for="keyword in session.keywords" :key="keyword">{{
+            keyword
+          }}</span>
+        </div>
+        <div class="voice-wave" :class="{ active: sending }" aria-hidden="true">
+          <i v-for="index in 14" :key="index"></i>
+        </div>
+      </section>
+
+      <section class="practice-console">
+        <header>
+          <div>
+            <span>LIVE PRACTICE</span>
+            <h2>中文口语练习</h2>
+          </div>
+          <p>点击 ICE 的回答即可再次朗读</p>
+        </header>
+
+        <div ref="stage" class="turn-stage" aria-live="polite">
+          <article
+            v-for="turn in session.turns"
+            :key="turn.id"
+            :class="['practice-turn', turn.speaker]"
+            @click="turn.speaker === 'tutor' && speak(turn.content)"
+          >
+            <img
+              v-if="turn.speaker !== 'system'"
+              :src="turn.speaker === 'student' ? studentAvatar : teacherAvatar"
+              alt=""
+            />
+            <div>
+              <small>
+                {{
+                  turn.speaker === 'student'
+                    ? '我'
+                    : turn.speaker === 'tutor'
+                      ? 'ICE'
+                      : '练习提示'
+                }}
+              </small>
+              <p>{{ turn.content }}</p>
             </div>
-          </div>
-        </el-card>
-        <el-card class="box-card">
-          <template #header>
-            <span>生词表</span>
-          </template>
-          <el-table :data="words" style="width: 100%">
-            <el-table-column prop="word" label="生词名"></el-table-column>
-            <el-table-column prop="pinyin" label="拼音"></el-table-column>
-            <el-table-column prop="en" label="英文翻译"></el-table-column>
-            <el-table-column prop="zh" label="中文释义"></el-table-column>
-          </el-table>
-        </el-card>
-        <el-card class="box-card">
-          <template #header>
-            <span>语法点</span>
-          </template>
-          <el-collapse v-model="activeNames">
-            <el-collapse-item
-              v-for="(grammar, index) in grammarData"
-              :key="index"
-              :title="grammar.name"
-              :name="index.toString()"
-            >
-              <p><strong>语法名称:</strong> {{ grammar.name }}</p>
-              <p><strong>语法意义及功能:</strong> {{ grammar.meaning }}</p>
-              <p><strong>练习与测试:</strong> {{ grammar.practice }}</p>
-            </el-collapse-item>
-          </el-collapse>
-        </el-card>
-      </div>
-      <!-- 右侧数字人区 -->
-      <div class="right-panel">
-        <div class="digital-human-card" @click="showDigitalDialog = true">
-          <img src="@/assets/icon/teacher.png" class="digital-human-avatar" />
-          <div class="digital-human-role">数字人</div>
-          <div class="digital-human-name">ICE数字助教</div>
+          </article>
+          <div v-if="sending" class="thinking">ICE 正在分析你的表达…</div>
         </div>
-        <div class="student-card">
-          <img src="@/assets/student/avatar.png" class="student-avatar" />
-          <div class="student-role">我</div>
-          <div class="student-name">Kimberly</div>
-        </div>
-      </div>
-    </div>
-    <el-dialog v-model="showDigitalDialog" title="数字人语音对话" width="320px">
-      <div style="text-align: center">
-        <img
-          src="@/assets/icon/teacher.png"
-          style="
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            margin-bottom: 10px;
-          "
-        />
-        <div style="font-size: 16px; color: #333">
-          你好，我是ICE数字助教，有什么可以帮你？
-        </div>
-      </div>
-    </el-dialog>
+
+        <form class="voice-composer" @submit.prevent="send">
+          <button
+            class="microphone"
+            type="button"
+            :disabled="!canListen"
+            :class="{ listening }"
+            :title="canListen ? '语音输入' : '当前浏览器不支持语音识别'"
+            @click="startListening"
+          >
+            {{ listening ? '录' : '麦' }}
+          </button>
+          <el-input
+            v-model="message"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 4 }"
+            maxlength="2000"
+            placeholder="说一句中文，ICE 会给出下一步反馈…"
+            @keydown.enter.exact.prevent="send"
+          />
+          <el-button type="primary" native-type="submit" :loading="sending">
+            发送
+          </el-button>
+        </form>
+      </section>
+    </main>
   </div>
 </template>
 
-<script setup>
-import { ref } from 'vue'
-const dialogLines = [
-  'A：我们来模拟餐厅点餐。',
-  'B：好呀，你想当顾客还是服务员？',
-  'A：我当顾客。',
-  'B：您好，请问几位？',
-  'A：一位。',
-  'B：请来这边坐。要喝点什么？',
-  'A：给我一杯水，谢谢。',
-  'B：好的，马上就到。'
-]
-const words = ref([
-  { word: '点餐', pinyin: 'diǎn cān', en: 'order food', zh: '在餐厅点食物' },
-  { word: '顾客', pinyin: 'gù kè', en: 'customer', zh: '消费的人' },
-  {
-    word: '服务员',
-    pinyin: 'fú wù yuán',
-    en: 'waiter/waitress',
-    zh: '提供服务的人'
-  },
-  { word: '请问', pinyin: 'qǐng wèn', en: 'may I ask', zh: '礼貌提问' },
-  { word: '一位', pinyin: 'yí wèi', en: 'one person', zh: '一个人' }
-])
-const grammarData = ref([
-  { name: '请问', meaning: '用于礼貌提问', practice: '请问，这道菜怎么做？' },
-  { name: '要', meaning: '表示需要', practice: '我要一杯水。' }
-])
-const activeNames = ref(['0'])
-const showDigitalDialog = ref(false)
-
-// 数字人朗读对话
-function digitalHumanRead(line) {
-  window.$message?.success?.('数字人正在朗读：' + line) ||
-    alert('数字人正在朗读：' + line)
-}
-
-// 数字人问答模拟
-const qaInput = ref('')
-const qaHistory = ref([])
-function askDigitalHuman() {
-  if (!qaInput.value.trim()) return
-  // 简单模拟数字人回复
-  let answer = ''
-  if (qaInput.value.includes('你好')) {
-    answer = '你好，很高兴见到你！'
-    addWord({ word: '你好', pinyin: 'nǐ hǎo', en: 'hello', zh: '打招呼用语' })
-    addGrammar({ name: '你好', meaning: '打招呼', practice: '你好，老师。' })
-  } else if (qaInput.value.includes('点餐')) {
-    answer = '点餐时可以说"请问，可以点餐了吗？"'
-    addWord({
-      word: '点餐',
-      pinyin: 'diǎn cān',
-      en: 'order food',
-      zh: '在餐厅点食物'
-    })
-    addGrammar({
-      name: '可以',
-      meaning: '表示许可',
-      practice: '我可以点餐了吗？'
-    })
-  } else {
-    answer = '这是数字人的模拟回答。'
-  }
-  qaHistory.value.push({ q: qaInput.value, a: answer })
-  qaInput.value = ''
-}
-function addWord(wordObj) {
-  if (!words.value.find((w) => w.word === wordObj.word)) {
-    words.value.push(wordObj)
-  }
-}
-function addGrammar(grammarObj) {
-  if (!grammarData.value.find((g) => g.name === grammarObj.name)) {
-    grammarData.value.push(grammarObj)
-  }
-}
-</script>
-
 <style scoped>
-.digital-human-page {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #6a8dff 0%, #a084ee 100%);
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
+.immersion-room {
+  --night: #071d24;
+  --mint: #75d7bd;
+  --warm: #f2bb68;
+  min-height: calc(100vh - 72px);
+  color: #edf8f4;
+  background:
+    radial-gradient(
+      circle at 18% 28%,
+      rgba(117, 215, 189, 0.14),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 82% 78%,
+      rgba(242, 187, 104, 0.1),
+      transparent 24%
+    ),
+    var(--night);
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', serif;
 }
-.header-bar {
+
+.room-header {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 20px;
+  border-bottom: 1px solid rgba(237, 248, 244, 0.13);
+  padding: 14px clamp(18px, 4vw, 48px);
+}
+
+.room-header > button {
+  justify-self: start;
+  border: 0;
+  color: #b6cbc4;
+  background: transparent;
+  cursor: pointer;
+}
+
+.room-header :deep(.el-switch) {
+  justify-self: end;
+}
+
+.room-status {
   display: flex;
   align-items: center;
+  gap: 9px;
+}
+
+.room-status small {
+  color: var(--mint);
+  font:
+    9px ui-monospace,
+    monospace;
+  letter-spacing: 0.13em;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 0 5px rgba(117, 215, 189, 0.12);
+}
+
+.room-loading {
+  padding: 70px;
+}
+
+.room-grid {
+  display: grid;
+  min-height: calc(100vh - 132px);
+  grid-template-columns: minmax(290px, 0.82fr) minmax(430px, 1.18fr);
+}
+
+.avatar-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid rgba(237, 248, 244, 0.13);
+  padding: 42px;
+  text-align: center;
+}
+
+.avatar-frame {
+  z-index: 1;
+  width: clamp(150px, 20vw, 250px);
+  overflow: hidden;
+  border: 1px solid rgba(117, 215, 189, 0.5);
+  border-radius: 50%;
+  padding: 12px;
+  background: rgba(117, 215, 189, 0.06);
+  box-shadow: 0 0 70px rgba(117, 215, 189, 0.14);
+  aspect-ratio: 1;
+}
+
+.avatar-frame img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.orbital {
+  position: absolute;
+  border: 1px solid rgba(117, 215, 189, 0.16);
+  border-radius: 50%;
+  animation: rotate 26s linear infinite;
+}
+
+.orbital::after {
+  position: absolute;
+  top: 8%;
+  left: 16%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warm);
+  content: '';
+}
+
+.orbital-one {
+  width: 390px;
+  height: 390px;
+}
+
+.orbital-two {
+  width: 520px;
+  height: 520px;
+  animation-direction: reverse;
+  animation-duration: 38s;
+}
+
+.avatar-stage > p {
+  z-index: 1;
+  margin: 24px 0 5px;
+  color: var(--mint);
+  font:
+    10px ui-monospace,
+    monospace;
+  letter-spacing: 0.16em;
+}
+
+.avatar-stage h1 {
+  z-index: 1;
+  margin: 0;
+  font-size: clamp(24px, 3.5vw, 42px);
+}
+
+.keywords {
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.keywords span {
+  border: 1px solid rgba(237, 248, 244, 0.25);
+  padding: 4px 9px;
+  color: #b9cbc6;
+  font-size: 12px;
+}
+
+.voice-wave {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 42px;
+  margin-top: 24px;
+}
+
+.voice-wave i {
+  width: 2px;
+  height: 8px;
+  background: var(--mint);
+}
+
+.voice-wave.active i {
+  animation: wave 0.8s ease-in-out infinite alternate;
+}
+
+.voice-wave i:nth-child(3n) {
+  animation-delay: 0.2s;
+}
+.voice-wave i:nth-child(4n) {
+  animation-delay: 0.4s;
+}
+
+.practice-console {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto 1fr auto;
+  padding: clamp(24px, 4vw, 50px);
+}
+
+.practice-console > header {
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid rgba(237, 248, 244, 0.13);
+  padding-bottom: 20px;
+}
+
+.practice-console header span {
+  color: var(--warm);
+  font:
+    9px ui-monospace,
+    monospace;
+  letter-spacing: 0.17em;
+}
+
+.practice-console header h2 {
+  margin: 6px 0 0;
+  font-size: 27px;
+}
+
+.practice-console header p {
+  margin: 0;
+  color: #91a59f;
+  font-size: 12px;
+}
+
+.turn-stage {
+  max-height: calc(100vh - 330px);
+  overflow-y: auto;
+  padding: 28px 2px;
+}
+
+.practice-turn {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 82%;
   margin-bottom: 20px;
 }
-.back-btn {
-  color: #fff;
-  font-weight: bold;
-  text-decoration: none;
-  font-size: 16px;
-  background: linear-gradient(90deg, #6a8dff 0%, #a084ee 100%);
-  padding: 6px 18px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px 0 rgba(106, 141, 255, 0.12);
-  transition: background 0.3s;
+
+.practice-turn.student {
+  margin-left: auto;
+  flex-direction: row-reverse;
+  text-align: right;
 }
-.back-btn:hover {
-  background: linear-gradient(90deg, #a084ee 0%, #6a8dff 100%);
+
+.practice-turn.system {
+  max-width: 100%;
+  border-left: 2px solid var(--warm);
+  padding: 4px 12px;
+  color: #9baea8;
 }
-.user-info {
-  display: flex;
-  align-items: center;
-}
-.user-avatar {
+
+.practice-turn img {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  margin-right: 8px;
-  border: 2px solid #e0e7ef;
+  object-fit: cover;
 }
-.user-name {
-  font-size: 16px;
-  color: #fff;
-  font-weight: 500;
+
+.practice-turn small {
+  color: var(--mint);
+  font:
+    9px ui-monospace,
+    monospace;
+  letter-spacing: 0.1em;
 }
-.qa-dialog-area {
-  width: 100%;
-  max-width: 900px;
-  margin: 0 auto 32px auto;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 18px;
-  box-shadow: 0 4px 24px 0 rgba(106, 141, 255, 0.1);
-  padding: 24px 32px 16px 32px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+
+.practice-turn p {
+  margin: 5px 0 0;
+  color: #e5f1ed;
+  line-height: 1.8;
 }
-.qa-dialog-list {
-  max-height: 220px;
-  overflow-y: auto;
-  margin-bottom: 18px;
-}
-.qa-dialog-item {
-  margin-bottom: 12px;
-}
-.qa-bubble {
-  display: flex;
-  align-items: flex-end;
-  margin-bottom: 4px;
-}
-.user-bubble {
-  justify-content: flex-end;
-}
-.digital-bubble {
-  justify-content: flex-start;
-}
-.user-bubble span,
-.digital-bubble span {
-  display: inline-block;
-  padding: 10px 18px;
-  border-radius: 18px;
-  font-size: 16px;
-  max-width: 340px;
-  word-break: break-all;
-  box-shadow: 0 2px 8px 0 rgba(106, 141, 255, 0.1);
-}
-.user-bubble span {
-  background: linear-gradient(90deg, #6a8dff 0%, #a084ee 100%);
-  color: #fff;
-  margin-left: 8px;
-}
-.digital-bubble span {
-  background: #f4f8ff;
-  color: #6a8dff;
-  margin-right: 8px;
-}
-.bubble-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  box-shadow: 0 2px 8px 0 rgba(160, 132, 238, 0.1);
-}
-.qa-input-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-}
-.qa-input {
-  flex: 1;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px 0 rgba(160, 132, 238, 0.08);
-  border: none;
-  font-size: 16px;
-  padding: 8px 14px;
-}
-.qa-btn {
-  background: linear-gradient(90deg, #6a8dff 0%, #a084ee 100%);
-  border: none;
-  border-radius: 12px;
-  color: #fff;
-  font-weight: bold;
-  font-size: 16px;
-  box-shadow: 0 2px 8px 0 rgba(106, 141, 255, 0.15);
-  padding: 8px 24px;
-  transition: background 0.3s;
-}
-.qa-btn:hover {
-  background: linear-gradient(90deg, #a084ee 0%, #6a8dff 100%);
-}
-.btn-gradient-text {
-  background: linear-gradient(90deg, #fff 0%, #e0e7ef 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: bold;
-}
-.main-content {
-  display: flex;
-  flex: 1;
-  gap: 24px;
-}
-.left-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.box-card {
-  margin-bottom: 16px;
-  border-radius: 16px;
-  box-shadow: 0 4px 24px 0 rgba(106, 141, 255, 0.1);
-  border: none;
-}
-.lesson-title {
-  font-size: 28px;
-  font-weight: bold;
-  color: #222;
-  margin: 24px 0 16px 0;
-  text-align: center;
-}
-.dialog-content {
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 8px;
-  padding: 24px;
-  font-size: 18px;
-  color: #222;
-  min-height: 220px;
-}
-.dialog-line {
-  margin-bottom: 8px;
-}
-.dialog-clickable {
+
+.practice-turn.tutor {
   cursor: pointer;
-  transition: color 0.2s;
 }
-.dialog-clickable:hover {
-  color: #6a8dff;
-  text-decoration: underline;
+
+.thinking {
+  color: var(--mint);
+  font-size: 12px;
+  animation: fade 1.1s ease-in-out infinite alternate;
 }
-.right-panel {
-  width: 240px;
-  min-width: 180px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 32px;
+
+.voice-composer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 9px;
+  border-top: 1px solid rgba(237, 248, 244, 0.13);
+  padding-top: 16px;
 }
-.digital-human-card,
-.student-card {
-  background: linear-gradient(135deg, #e0e7ef 0%, #f4f8ff 100%);
-  border-radius: 20px;
-  box-shadow: 0 4px 24px 0 rgba(160, 132, 238, 0.1);
-  padding: 28px 16px 18px 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  cursor: pointer;
-  border: none;
-}
-.digital-human-avatar,
-.student-avatar {
-  width: 72px;
-  height: 72px;
+
+.microphone {
+  width: 42px;
+  border: 1px solid rgba(117, 215, 189, 0.5);
   border-radius: 50%;
-  margin-bottom: 8px;
-  border: 2px solid #6a8dff;
-  background: #f0f6ff;
+  color: var(--mint);
+  background: transparent;
+  cursor: pointer;
 }
-.digital-human-role,
-.student-role {
-  font-size: 14px;
-  color: #6a8dff;
-  margin-bottom: 4px;
+
+.microphone.listening {
+  color: var(--night);
+  background: var(--warm);
+  animation: fade 0.6s ease-in-out infinite alternate;
 }
-.digital-human-name,
-.student-name {
-  font-size: 16px;
-  color: #333;
-  font-weight: 500;
+
+.voice-composer :deep(.el-textarea__inner) {
+  color: #e5f1ed;
+  border-color: rgba(237, 248, 244, 0.2);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: none;
+}
+
+.voice-composer :deep(.el-button--primary) {
+  border-color: var(--mint);
+  background: var(--mint);
+  color: var(--night);
+}
+
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes wave {
+  to {
+    height: 34px;
+  }
+}
+@keyframes fade {
+  to {
+    opacity: 0.45;
+  }
+}
+
+@media (max-width: 900px) {
+  .room-header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .room-status {
+    display: none;
+  }
+
+  .room-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .avatar-stage {
+    min-height: 480px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(237, 248, 244, 0.13);
+  }
+
+  .turn-stage {
+    max-height: 560px;
+  }
 }
 </style>

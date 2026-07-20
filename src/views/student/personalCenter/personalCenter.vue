@@ -9,21 +9,16 @@ const studentStore = useStudentStore()
 const routerList = [
   {
     id: 1,
-    name: '个人消息',
+    name: '个人资料',
     path: '/student/center/info'
   },
   {
     id: 2,
-    name: '会员信息',
-    path: '/student/center/vip'
-  },
-  {
-    id: 3,
     name: '修改密码',
     path: '/student/center/changePassword'
   },
   {
-    id: 4,
+    id: 3,
     name: '消息通知',
     path: '/student/center/message'
   }

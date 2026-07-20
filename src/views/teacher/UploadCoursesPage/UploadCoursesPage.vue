@@ -1,155 +1,133 @@
 <script setup>
-import { onUnmounted, ref } from 'vue'
-import { UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+
+import { createCourse, submitCourse } from '@/api/platform'
 
 const router = useRouter()
 const courseFormRef = ref(null)
+const isSubmitting = ref(false)
+const coverFileList = ref([])
+const coverPreviewUrl = ref('')
 
 const form = ref({
   title: '',
-  category: '',
-  desc: '',
-  questionType: '',
-  homeworkContent: ''
+  summary: '',
+  description: '',
+  category: '综合汉语',
+  level: 'beginner',
+  durationMinutes: 45,
+  priceYuan: 99,
+  capacity: 20
 })
 
 const rules = {
-  title: [{ required: true, message: '请输入课程标题', trigger: 'blur' }],
+  title: [
+    { required: true, message: '请输入课程名称', trigger: 'blur' },
+    { max: 160, message: '课程名称不能超过 160 个字符', trigger: 'blur' }
+  ],
+  summary: [
+    { required: true, message: '请用一句话说明课程价值', trigger: 'blur' },
+    { max: 500, message: '课程简介不能超过 500 个字符', trigger: 'blur' }
+  ],
+  description: [{ required: true, message: '请填写课程详情', trigger: 'blur' }],
   category: [{ required: true, message: '请选择课程分类', trigger: 'change' }],
-  desc: [{ required: true, message: '请输入课程简介', trigger: 'blur' }]
+  level: [{ required: true, message: '请选择适用级别', trigger: 'change' }],
+  durationMinutes: [
+    { required: true, message: '请输入课时长度', trigger: 'change' }
+  ],
+  priceYuan: [{ required: true, message: '请输入课程价格', trigger: 'change' }],
+  capacity: [{ required: true, message: '请输入班级容量', trigger: 'change' }]
 }
-
-const coverFileList = ref([])
-const videoFileList = ref([])
-const copyFileList = ref([])
-const coverPreviewUrl = ref('')
-const isSubmitting = ref(false)
-const homeworkConfirmed = ref(false)
-const submissionSummary = ref(null)
 
 const revokeCoverPreview = () => {
-  if (coverPreviewUrl.value) {
-    URL.revokeObjectURL(coverPreviewUrl.value)
-    coverPreviewUrl.value = ''
-  }
-}
+  if (!coverPreviewUrl.value) return
 
-const removeInvalidFile = (fileList, uploadFile) => {
-  fileList.value = fileList.value.filter((file) => file.uid !== uploadFile.uid)
-}
-
-const validateFile = (uploadFile, fileList, options) => {
-  const rawFile = uploadFile.raw
-  if (!rawFile) return false
-
-  const fileName = rawFile.name.toLowerCase()
-  const typeAccepted =
-    options.mimeTypes.some((type) => rawFile.type.startsWith(type)) ||
-    options.extensions.some((extension) => fileName.endsWith(extension))
-
-  if (!typeAccepted) {
-    removeInvalidFile(fileList, uploadFile)
-    ElMessage.error(`${options.label}格式不受支持`)
-    return false
-  }
-
-  if (rawFile.size > options.maxSize) {
-    removeInvalidFile(fileList, uploadFile)
-    ElMessage.error(`${options.label}大小不能超过 ${options.maxSizeLabel}`)
-    return false
-  }
-
-  return true
+  URL.revokeObjectURL(coverPreviewUrl.value)
+  coverPreviewUrl.value = ''
 }
 
 const handleCoverChange = (uploadFile, uploadFiles) => {
+  const rawFile = uploadFile.raw
+  if (!rawFile) return
+
+  const isImage = ['image/jpeg', 'image/png', 'image/webp'].includes(
+    rawFile.type
+  )
+  const isWithinLimit = rawFile.size <= 2 * 1024 * 1024
+
+  if (!isImage || !isWithinLimit) {
+    coverFileList.value = uploadFiles.filter(
+      (file) => file.uid !== uploadFile.uid
+    )
+    ElMessage.error(
+      isImage ? '封面不能超过 2MB' : '仅支持 JPG、PNG 或 WebP 封面'
+    )
+    return
+  }
+
   coverFileList.value = uploadFiles
-  const isValid = validateFile(uploadFile, coverFileList, {
-    label: '封面',
-    mimeTypes: ['image/jpeg', 'image/png'],
-    extensions: ['.jpg', '.jpeg', '.png'],
-    maxSize: 500 * 1024,
-    maxSizeLabel: '500KB'
-  })
-
-  if (!isValid) return
-
   revokeCoverPreview()
-  coverPreviewUrl.value = URL.createObjectURL(uploadFile.raw)
-}
-
-const handleVideoChange = (uploadFile, uploadFiles) => {
-  videoFileList.value = uploadFiles
-  validateFile(uploadFile, videoFileList, {
-    label: '视频',
-    mimeTypes: ['video/'],
-    extensions: ['.mp4', '.webm', '.mov'],
-    maxSize: 10 * 1024 * 1024,
-    maxSizeLabel: '10MB'
-  })
-}
-
-const handleCopyChange = (uploadFile, uploadFiles) => {
-  copyFileList.value = uploadFiles
-  validateFile(uploadFile, copyFileList, {
-    label: '课程文案',
-    mimeTypes: ['text/plain', 'application/pdf', 'application/msword'],
-    extensions: ['.txt', '.pdf', '.doc', '.docx'],
-    maxSize: 5 * 1024 * 1024,
-    maxSizeLabel: '5MB'
-  })
+  coverPreviewUrl.value = URL.createObjectURL(rawFile)
 }
 
 const handleCoverRemove = () => {
   revokeCoverPreview()
 }
 
-const handlePreview = (uploadFile) => {
-  ElMessage.info(`${uploadFile.name} 仅保留在当前浏览器，尚未上传服务器`)
-}
-
 const handleExceed = () => {
-  ElMessage.warning('每类材料仅可选择 1 个文件，请先移除原文件')
+  ElMessage.warning('仅保留一张封面，请先移除当前文件')
 }
 
-const confirmHomework = () => {
-  if (!form.value.questionType || !form.value.homeworkContent.trim()) {
-    ElMessage.warning('请先选择题型并填写作业内容')
-    return
-  }
+const buildPayload = () => ({
+  title: form.value.title.trim(),
+  summary: form.value.summary.trim(),
+  description: form.value.description.trim(),
+  category: form.value.category,
+  level: form.value.level,
+  coverUrl: null,
+  durationMinutes: Number(form.value.durationMinutes),
+  priceCents: Math.round(Number(form.value.priceYuan) * 100),
+  capacity: Number(form.value.capacity)
+})
 
-  homeworkConfirmed.value = true
-  ElMessage.success('课后作业已加入当前课程草稿')
-}
-
-const handleSubmit = async () => {
+const saveCourse = async (shouldSubmit) => {
   const isValid = await courseFormRef.value?.validate().catch(() => false)
   if (!isValid) {
-    ElMessage.warning('请完善课程基本信息')
-    return
-  }
-
-  if (coverFileList.value.length === 0 || videoFileList.value.length === 0) {
-    ElMessage.warning('请选择课程封面和课程视频')
+    ElMessage.warning('请先完善课程信息')
     return
   }
 
   isSubmitting.value = true
+  let createdCourse = null
 
   try {
-    submissionSummary.value = {
-      title: form.value.title,
-      category: form.value.category,
-      files: [
-        coverFileList.value[0]?.name,
-        videoFileList.value[0]?.name,
-        copyFileList.value[0]?.name
-      ].filter(Boolean)
+    createdCourse = await createCourse(buildPayload())
+    const result = shouldSubmit
+      ? await submitCourse(createdCourse.id)
+      : createdCourse
+
+    ElMessage.success(shouldSubmit ? '课程已提交审核' : '课程草稿已保存')
+    await router.replace({
+      path: '/teacher/courseDetails',
+      query: { id: result.id }
+    })
+  } catch (error) {
+    if (createdCourse) {
+      ElMessage.warning('草稿已保存，但提交审核失败；你可以在详情页重新提交')
+      await router.replace({
+        path: '/teacher/courseDetails',
+        query: { id: createdCourse.id }
+      })
+      return
     }
 
-    ElMessage.success('课程原型草稿已生成，所选文件尚未上传服务器')
+    if (!error?.messageShown) {
+      ElMessage.error(
+        shouldSubmit ? '提交失败，请稍后重试' : '保存失败，请稍后重试'
+      )
+    }
   } finally {
     isSubmitting.value = false
   }
@@ -159,195 +137,506 @@ onUnmounted(revokeCoverPreview)
 </script>
 
 <template>
-  <div class="mt-36 mx-auto py-3 px-5 max-w-[2000px] bg-primary rounded-3xl">
-    <!-- 头部区域 -->
-    <div class="flex items-center mb-5">
+  <main class="course-create mt-36 mx-auto overflow-hidden rounded-[28px]">
+    <header class="create-header">
       <button
         type="button"
-        class="mr-8 rounded-lg p-2 hover:bg-white"
-        aria-label="返回上一页"
-        @click="router.go(-1)"
+        class="back-button"
+        aria-label="返回课程列表"
+        @click="router.push('/teacher/onlineCourses')"
       >
-        <img class="w-8 h-8" src="@/assets/icon/left-arrow-key.svg" alt="" />
+        ←
       </button>
-      <div
-        class="flex-1 flex items-center justify-center h-16 text-3xl font-bold rounded-2xl bg-white text-gray-500"
-      >
-        上传课程
+      <div>
+        <p class="eyebrow">NEW COURSE · 新建课程</p>
+        <h1>从一个明确的学习成果开始。</h1>
+        <p>保存后生成真实草稿；准备就绪时，可直接进入管理员审核队列。</p>
       </div>
-    </div>
-    <!-- 设置课程相关内容区域 -->
-    <div class="pl-16 pr-5 py-5 mb-5 bg-white rounded-3xl">
-      <div class="flex flex-col gap-8 xl:flex-row">
-        <!-- 左侧 -->
-        <div class="basis-1/2 rounded-2xl overflow-hidden">
+      <span class="draft-mark">DRAFT 01</span>
+    </header>
+
+    <section class="create-body">
+      <aside class="preview-column">
+        <div class="cover-preview">
           <img
             v-if="coverPreviewUrl"
-            class="w-full h-[520px]"
             :src="coverPreviewUrl"
-            alt="已选择的课程封面预览"
+            alt="当前课程封面预览"
           />
-          <img
-            v-else
-            class="w-full h-[520px] object-cover"
-            src="@/assets/student/onlineCourses/旅游.png"
-            alt="课程封面占位图"
-          />
-        </div>
-        <!-- 右侧 -->
-        <div class="basis-1/2">
-          <el-form
-            ref="courseFormRef"
-            :model="form"
-            :rules="rules"
-            label-width="88px"
-          >
-            <el-form-item label="课程标题" prop="title">
-              <el-input v-model="form.title" />
-            </el-form-item>
-            <el-form-item label="课程分类" prop="category">
-              <el-select v-model="form.category" placeholder="请选择课程分类">
-                <el-option label="口语" value="speaking" />
-                <el-option label="语法" value="grammar" />
-                <el-option label="中华文化" value="culture" />
-                <el-option label="HSK 备考" value="hsk" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="上传封面">
-              <el-upload
-                v-model:file-list="coverFileList"
-                class="upload-demo"
-                :auto-upload="false"
-                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                :on-change="handleCoverChange"
-                :on-preview="handlePreview"
-                :on-remove="handleCoverRemove"
-                :limit="1"
-                :on-exceed="handleExceed"
-              >
-                <el-button>上传封面</el-button>
-                <template #tip>
-                  <div class="el-upload__tip">
-                    JPG/PNG，最大 500KB；文件仅在本地预览
-                  </div>
-                </template>
-              </el-upload>
-            </el-form-item>
-            <el-form-item label="上传视频">
-              <el-upload
-                v-model:file-list="videoFileList"
-                class="upload-demo"
-                :auto-upload="false"
-                accept="video/*,.mp4,.webm,.mov"
-                :on-change="handleVideoChange"
-                :on-preview="handlePreview"
-                :limit="1"
-                :on-exceed="handleExceed"
-              >
-                <el-button type="primary">上传视频</el-button>
-                <template #tip>
-                  <div class="el-upload__tip">
-                    MP4/WebM/MOV，最大 10MB；不会自动上传
-                  </div>
-                </template>
-              </el-upload>
-            </el-form-item>
-            <el-form-item label="上传文案">
-              <el-upload
-                v-model:file-list="copyFileList"
-                class="upload-demo w-full"
-                drag
-                :auto-upload="false"
-                accept=".txt,.pdf,.doc,.docx"
-                :on-change="handleCopyChange"
-                :on-preview="handlePreview"
-                :limit="1"
-                :on-exceed="handleExceed"
-              >
-                <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-                <div class="el-upload__text">
-                  拖拽文案到这里，或<em>点击选择</em>
-                </div>
-                <template #tip>
-                  <div class="el-upload__tip">
-                    TXT/PDF/DOC/DOCX，最大 5MB；不会自动上传
-                  </div>
-                </template>
-              </el-upload>
-            </el-form-item>
-            <el-form-item label="课程简介" prop="desc">
-              <el-input v-model="form.desc" type="textarea" />
-            </el-form-item>
-            <el-form-item>
-              <el-button
-                type="success"
-                :loading="isSubmitting"
-                @click="handleSubmit"
-              >
-                生成课程草稿
-              </el-button>
-            </el-form-item>
-          </el-form>
-          <div
-            v-if="submissionSummary"
-            class="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800"
-            role="status"
-          >
-            <p class="font-semibold">
-              “{{ submissionSummary.title }}”草稿已就绪
-            </p>
-            <p>分类：{{ submissionSummary.category }}</p>
-            <p>本地文件：{{ submissionSummary.files.join('、') }}</p>
-            <p class="mt-1">当前为前端原型，文件未发送到任何服务器。</p>
+          <div v-else class="cover-placeholder">
+            <small>INTERNATIONAL CHINESE</small>
+            <strong>{{ form.title || '课程封面' }}</strong>
+            <span>{{ form.category }} · {{ form.durationMinutes }} 分钟</span>
           </div>
         </div>
-      </div>
-    </div>
-    <!-- 设置课后作业的区域 -->
-    <div class="pl-16 pr-5 py-5 mb-5 bg-white rounded-3xl">
-      <!-- 头部区域 -->
-      <div class="flex items-center mb-5">
-        <div
-          class="mr-5 bg-primary text-gray-500 font-bold text-2xl rounded-2xl px-3 py-2"
+
+        <div class="preview-note">
+          <span class="note-index">01</span>
+          <div>
+            <h2>封面是可选项</h2>
+            <p>
+              当前版本只做本地预览，不上传文件；不选择封面也能完整创建并提交课程。
+            </p>
+          </div>
+        </div>
+
+        <el-upload
+          v-model:file-list="coverFileList"
+          class="cover-uploader"
+          :auto-upload="false"
+          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          :on-change="handleCoverChange"
+          :on-remove="handleCoverRemove"
+          :limit="1"
+          :on-exceed="handleExceed"
         >
-          设置课后作业
+          <el-button>选择本地封面</el-button>
+          <template #tip>
+            <div class="el-upload__tip">
+              JPG / PNG / WebP，最大 2MB，仅用于本页预览。
+            </div>
+          </template>
+        </el-upload>
+      </aside>
+
+      <section class="form-column">
+        <div class="section-heading">
+          <span>课程信息</span>
+          <small>带 * 的字段需要完整填写</small>
         </div>
-        <div class="p-3 bg-primary rounded-full" aria-hidden="true">
-          <img class="w-5 h-5" src="@/assets/icon/add.svg" alt="" />
-        </div>
-      </div>
-      <!-- 内容区域 -->
-      <div class="px-5 py-10 bg-gray-100 rounded-3xl">
-        <el-form>
-          <el-form-item label="选择题型">
-            <el-select
-              :style="{ width: '240px' }"
-              v-model="form.questionType"
-              placeholder="请选择题型"
-            >
-              <el-option label="选择题" value="choice" />
-              <el-option label="填空题" value="fill" />
-              <el-option label="简答题" value="short-answer" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="作业内容">
-            <el-input
-              v-model="form.homeworkContent"
-              type="textarea"
-              :style="{ width: '480px' }"
-              :rows="4"
-              placeholder="请输入题目、选项或作答要求"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="confirmHomework">
-              {{ homeworkConfirmed ? '已确认' : '确认加入草稿' }}
-            </el-button>
-          </el-form-item>
+
+        <el-form
+          ref="courseFormRef"
+          :model="form"
+          :rules="rules"
+          label-position="top"
+          size="large"
+        >
+          <div class="form-grid">
+            <el-form-item class="span-two" label="课程名称" prop="title">
+              <el-input
+                v-model="form.title"
+                maxlength="160"
+                show-word-limit
+                placeholder="例如：城市生活中文 · 问路与交通"
+              />
+            </el-form-item>
+
+            <el-form-item class="span-two" label="一句话简介" prop="summary">
+              <el-input
+                v-model="form.summary"
+                maxlength="500"
+                show-word-limit
+                placeholder="告诉学习者：学完这门课可以做到什么"
+              />
+            </el-form-item>
+
+            <el-form-item label="课程分类" prop="category">
+              <el-select v-model="form.category" class="w-full">
+                <el-option label="综合汉语" value="综合汉语" />
+                <el-option label="生活口语" value="生活口语" />
+                <el-option label="文化口语" value="文化口语" />
+                <el-option label="语法精讲" value="语法精讲" />
+                <el-option label="HSK 备考" value="HSK 备考" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="适用级别" prop="level">
+              <el-select v-model="form.level" class="w-full">
+                <el-option label="入门" value="beginner" />
+                <el-option label="初级" value="elementary" />
+                <el-option label="中级" value="intermediate" />
+                <el-option label="高级" value="advanced" />
+                <el-option label="全级别" value="all" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="单课时长（分钟）" prop="durationMinutes">
+              <el-input-number
+                v-model="form.durationMinutes"
+                :min="1"
+                :max="1440"
+                controls-position="right"
+                class="number-input"
+              />
+            </el-form-item>
+
+            <el-form-item label="课程价格（元）" prop="priceYuan">
+              <el-input-number
+                v-model="form.priceYuan"
+                :min="0"
+                :max="1000000"
+                :precision="2"
+                controls-position="right"
+                class="number-input"
+              />
+            </el-form-item>
+
+            <el-form-item label="班级容量（人）" prop="capacity">
+              <el-input-number
+                v-model="form.capacity"
+                :min="1"
+                :max="10000"
+                controls-position="right"
+                class="number-input"
+              />
+            </el-form-item>
+
+            <div class="process-card">
+              <strong>发布流程</strong>
+              <span>草稿 → 待审核 → 已发布</span>
+            </div>
+
+            <el-form-item class="span-two" label="课程详情" prop="description">
+              <el-input
+                v-model="form.description"
+                type="textarea"
+                :rows="8"
+                maxlength="30000"
+                show-word-limit
+                placeholder="建议包含：学习目标、教学内容、课堂活动、适合人群和学习材料。"
+              />
+            </el-form-item>
+          </div>
         </el-form>
-      </div>
-    </div>
-  </div>
+
+        <div class="action-bar">
+          <p>“保存草稿”可继续编辑；“保存并提交”后，在审核完成前不可修改。</p>
+          <div class="action-buttons">
+            <el-button
+              size="large"
+              :disabled="isSubmitting"
+              @click="saveCourse(false)"
+            >
+              保存草稿
+            </el-button>
+            <el-button
+              type="primary"
+              size="large"
+              :loading="isSubmitting"
+              @click="saveCourse(true)"
+            >
+              保存并提交审核
+            </el-button>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
 </template>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+.course-create {
+  --ink: #173247;
+  --muted: #657d8d;
+  max-width: 1720px;
+  color: var(--ink);
+  background: #edf8fb;
+  box-shadow: 0 28px 70px rgba(32, 87, 107, 0.15);
+}
+
+.create-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 22px;
+  padding: 42px 48px;
+  overflow: hidden;
+  color: #f6fdff;
+  background:
+    radial-gradient(
+      circle at 84% 10%,
+      rgba(120, 221, 230, 0.36),
+      transparent 28%
+    ),
+    #123f58;
+}
+
+.create-header::after {
+  position: absolute;
+  right: -40px;
+  bottom: -92px;
+  width: 290px;
+  height: 180px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  content: '';
+  transform: rotate(-12deg);
+}
+
+.back-button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  place-items: center;
+  font-size: 22px;
+  transition:
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.back-button:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateX(-2px);
+}
+
+.eyebrow {
+  margin: 0 0 9px;
+  color: #8cd6e4;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.create-header h1 {
+  margin: 0;
+  font-family: 'STKaiti', 'KaiTi', serif;
+  font-size: clamp(32px, 3vw, 48px);
+  line-height: 1.2;
+}
+
+.create-header p:last-child {
+  margin: 12px 0 0;
+  color: rgba(238, 250, 255, 0.72);
+}
+
+.draft-mark {
+  z-index: 1;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  color: #bcecf3;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.create-body {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.72fr) minmax(560px, 1.28fr);
+  gap: 42px;
+  padding: 42px 48px 52px;
+}
+
+.preview-column {
+  position: sticky;
+  top: 130px;
+  align-self: start;
+}
+
+.cover-preview {
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 10px solid #fff;
+  border-radius: 5px;
+  background: #b8e3eb;
+  box-shadow: 18px 22px 0 rgba(29, 96, 119, 0.1);
+  transform: rotate(-1.1deg);
+}
+
+.cover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cover-placeholder {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 24px,
+      rgba(17, 76, 98, 0.07) 24px 25px
+    ),
+    linear-gradient(145deg, #dff5f7, #8dcbd9);
+}
+
+.cover-placeholder small {
+  margin-bottom: 24px;
+  color: #397b91;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.cover-placeholder strong {
+  font-family: 'STKaiti', 'KaiTi', serif;
+  font-size: clamp(34px, 4vw, 54px);
+  line-height: 1.12;
+}
+
+.cover-placeholder span {
+  margin-top: 22px;
+  color: #456f80;
+  font-size: 13px;
+}
+
+.preview-note {
+  display: flex;
+  gap: 15px;
+  margin: 34px 0 22px;
+  padding: 18px;
+  border-left: 3px solid #2b819d;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.note-index {
+  color: #4f9cb3;
+  font-family: Georgia, serif;
+  font-size: 28px;
+}
+
+.preview-note h2 {
+  margin: 2px 0 5px;
+  font-size: 16px;
+}
+.preview-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cover-uploader {
+  padding-left: 18px;
+}
+
+.form-column {
+  padding: 30px 34px;
+  border: 1px solid rgba(25, 79, 100, 0.1);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(32, 87, 107, 0.08);
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 26px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(35, 91, 111, 0.12);
+}
+
+.section-heading span {
+  font-family: 'STKaiti', 'KaiTi', serif;
+  font-size: 28px;
+  font-weight: 800;
+}
+.section-heading small {
+  color: #8395a0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 22px;
+}
+
+.span-two {
+  grid-column: span 2;
+}
+.number-input {
+  width: 100%;
+}
+
+.process-card {
+  display: flex;
+  min-height: 72px;
+  flex-direction: column;
+  justify-content: center;
+  margin-top: 30px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  color: #2e6579;
+  background: #e8f6f8;
+}
+
+.process-card strong {
+  font-size: 13px;
+}
+.process-card span {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 14px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(35, 91, 111, 0.12);
+}
+
+.action-bar p {
+  max-width: 430px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.action-buttons {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1180px) {
+  .create-body {
+    grid-template-columns: 1fr;
+  }
+  .preview-column {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .cover-uploader {
+    grid-column: 2;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .create-header {
+    grid-template-columns: auto 1fr;
+    padding: 34px 22px;
+  }
+  .draft-mark {
+    display: none;
+  }
+  .create-body {
+    padding: 26px 18px 36px;
+  }
+  .preview-column {
+    display: block;
+  }
+  .form-column {
+    padding: 24px 18px;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .span-two {
+    grid-column: auto;
+  }
+  .action-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .action-buttons {
+    justify-content: flex-end;
+  }
+}
+</style>

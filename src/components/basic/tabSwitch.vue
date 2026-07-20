@@ -73,11 +73,16 @@ nextTick(() => {
 const showModal = ref(false)
 
 //模态框确认事件
-const handleExit = () => {
-  userStore.clearSession()
-  studentStore.clearUserInfo()
-  showModal.value = false
-  router.replace('/login')
+const handleExit = async () => {
+  try {
+    await userStore.logout()
+  } catch {
+    // 即使服务端暂时不可达，也必须清除本地资料并回到登录页。
+  } finally {
+    studentStore.clearUserInfo()
+    showModal.value = false
+    await router.replace('/login')
+  }
 }
 </script>
 <template>
