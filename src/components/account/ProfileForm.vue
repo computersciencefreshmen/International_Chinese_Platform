@@ -17,6 +17,7 @@ const errorMessage = ref('')
 const fileInput = ref(null)
 const pendingAvatar = ref(null)
 const previewUrl = ref('')
+const teacherVerifiedAt = ref(null)
 
 const form = reactive({
   displayName: '',
@@ -68,6 +69,7 @@ function applyProfile(profile) {
 
   const teacher = profile.teacherProfile
   if (teacher) {
+    teacherVerifiedAt.value = teacher.verifiedAt ?? null
     form.teacherProfile.school = teacher.school || ''
     form.teacherProfile.title = teacher.title || ''
     form.teacherProfile.experienceYears = teacher.experienceYears || 0
@@ -261,6 +263,17 @@ onBeforeUnmount(() => {
               <span>TEACHING PROFILE</span>
               <strong>专业教学资料</strong>
             </div>
+            <el-alert
+              class="verification-hint"
+              :type="teacherVerifiedAt ? 'warning' : 'info'"
+              show-icon
+              :closable="false"
+              :title="
+                teacherVerifiedAt
+                  ? '当前身份已认证；保存任何个人或专业资料后，需要管理员重新审核。'
+                  : '当前身份待认证；完善资料后请等待管理员人工核验。'
+              "
+            />
             <div class="two-column">
               <el-form-item label="院校 / 机构">
                 <el-input
@@ -359,6 +372,10 @@ onBeforeUnmount(() => {
   margin: 4px 0 8px;
   font-size: clamp(28px, 4vw, 44px);
   letter-spacing: -0.04em;
+}
+
+.verification-hint {
+  margin-bottom: 20px;
 }
 
 .sheet-header p {

@@ -9,7 +9,9 @@ import {
 } from '@element-plus/icons-vue'
 
 import { getCourseReviewQueue, reviewCourse } from '@/api/platform'
+import TeacherVerificationPanel from './teacherVerificationPanel.vue'
 
+const reviewMode = ref('courses')
 const queue = ref([])
 const loading = ref(false)
 const loadError = ref('')
@@ -127,232 +129,263 @@ onMounted(() => loadQueue())
     <header class="audit-header">
       <div>
         <p>QUALITY CONTROL</p>
-        <h1>课程审核中心</h1>
-        <span>每一次审核都会写入审计日志，并实时影响学生端课程可见性。</span>
+        <h1>平台审核中心</h1>
+        <span>课程发布与教师身份决定都会留存审核人、时间和审计记录。</span>
       </div>
       <div class="pending-badge">
         <el-icon><DocumentChecked /></el-icon>
-        <strong>{{ status === 'pending' ? total : '—' }}</strong>
-        <span>待处理</span>
+        <strong>{{
+          reviewMode === 'courses' && status === 'pending' ? total : '双轨'
+        }}</strong>
+        <span>课程 · 教师</span>
       </div>
     </header>
 
-    <div class="audit-toolbar">
-      <div class="status-tabs">
-        <button
-          v-for="tab in statusTabs"
-          :key="tab.value"
-          type="button"
-          :class="{ active: status === tab.value }"
-          @click="selectStatus(tab.value)"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-      <el-input
-        v-model="search"
-        clearable
-        class="audit-search"
-        placeholder="搜索课程或教师"
-        :prefix-icon="Search"
-        @keyup.enter="loadQueue({ resetPage: true })"
-        @clear="loadQueue({ resetPage: true })"
-      />
-    </div>
+    <nav class="audit-domain-tabs" aria-label="审核类型">
+      <button
+        type="button"
+        :class="{ active: reviewMode === 'courses' }"
+        @click="reviewMode = 'courses'"
+      >
+        课程内容审核
+      </button>
+      <button
+        type="button"
+        :class="{ active: reviewMode === 'teachers' }"
+        @click="reviewMode = 'teachers'"
+      >
+        教师身份认证
+      </button>
+    </nav>
 
-    <el-alert
-      v-if="loadError"
-      type="error"
-      show-icon
-      :closable="false"
-      :title="loadError"
-      class="error-alert"
-    >
-      <template #default>
-        <el-button link type="primary" :icon="Refresh" @click="loadQueue()">
-          重新加载
-        </el-button>
-      </template>
-    </el-alert>
-
-    <div class="table-shell">
-      <el-table v-loading="loading" :data="queue" row-key="course.id">
-        <el-table-column label="课程" min-width="280">
-          <template #default="{ row }">
-            <button type="button" class="course-cell" @click="openDetail(row)">
-              <span class="course-monogram">{{
-                row.course.title.slice(0, 1)
-              }}</span>
-              <span>
-                <strong>{{ row.course.title }}</strong>
-                <small
-                  >{{ row.course.category }} · {{ row.course.level }}</small
-                >
-              </span>
-            </button>
-          </template>
-        </el-table-column>
-        <el-table-column label="授课教师" min-width="180">
-          <template #default="{ row }">
-            <strong>{{ row.course.teacher.displayName }}</strong>
-            <small class="muted">{{
-              row.course.teacher.school || '未填写机构'
-            }}</small>
-          </template>
-        </el-table-column>
-        <el-table-column label="提交/更新时间" min-width="180">
-          <template #default="{ row }">{{
-            formatTime(row.submittedAt)
-          }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="statusMeta[row.course.status]?.type">
-              {{ statusMeta[row.course.status]?.label || row.course.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
-          <template #default="{ row }">
-            <el-button @click="openDetail(row)">查看详情</el-button>
-            <template v-if="row.course.status === 'pending'">
-              <el-button
-                type="success"
-                plain
-                @click="openReview(row, 'approve')"
-              >
-                通过
-              </el-button>
-              <el-button type="danger" plain @click="openReview(row, 'reject')">
-                驳回
-              </el-button>
-            </template>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty
-            :description="`暂无${statusMeta[status]?.label || ''}课程`"
-          />
-        </template>
-      </el-table>
-    </div>
-
-    <el-pagination
-      v-if="totalPages > 1"
-      class="pagination"
-      background
-      layout="prev, pager, next"
-      :page-size="pageSize"
-      :total="total"
-      :current-page="currentPage"
-      @current-change="
-        (page) => {
-          currentPage = page
-          loadQueue()
-        }
-      "
-    />
-
-    <el-drawer v-model="detailVisible" size="min(620px, 94vw)">
-      <template #header>
-        <div>
-          <p class="drawer-eyebrow">REVIEW DETAILS</p>
-          <h2>{{ selectedItem?.course.title }}</h2>
-        </div>
-      </template>
-
-      <article v-if="selectedItem" class="review-detail">
-        <div class="detail-hero">
-          <span>{{ selectedItem.course.category }}</span>
-          <el-tag
-            :type="statusMeta[selectedItem.course.status]?.type"
-            effect="dark"
+    <template v-if="reviewMode === 'courses'">
+      <div class="audit-toolbar">
+        <div class="status-tabs">
+          <button
+            v-for="tab in statusTabs"
+            :key="tab.value"
+            type="button"
+            :class="{ active: status === tab.value }"
+            @click="selectStatus(tab.value)"
           >
-            {{ statusMeta[selectedItem.course.status]?.label }}
-          </el-tag>
+            {{ tab.label }}
+          </button>
         </div>
-        <section>
-          <h3>课程摘要</h3>
-          <p>{{ selectedItem.course.summary || '暂无摘要' }}</p>
-        </section>
-        <section>
-          <h3>详细介绍</h3>
-          <p class="pre-line">
-            {{ selectedItem.course.description || '暂无详细介绍' }}
-          </p>
-        </section>
-        <div class="facts">
-          <span>教师：{{ selectedItem.course.teacher.displayName }}</span>
-          <span>时长：{{ selectedItem.course.durationMinutes }} 分钟</span>
-          <span>容量：{{ selectedItem.course.capacity }} 人</span>
-          <span
-            >价格：¥{{
-              (selectedItem.course.priceCents / 100).toFixed(0)
-            }}</span
-          >
-        </div>
-        <el-alert
-          v-if="selectedItem.latestReview"
-          :type="
-            selectedItem.latestReview.decision === 'approved'
-              ? 'success'
-              : 'warning'
-          "
-          :title="`最近审核：${selectedItem.latestReview.note || '无备注'}`"
-          :closable="false"
-          show-icon
+        <el-input
+          v-model="search"
+          clearable
+          class="audit-search"
+          placeholder="搜索课程或教师"
+          :prefix-icon="Search"
+          @keyup.enter="loadQueue({ resetPage: true })"
+          @clear="loadQueue({ resetPage: true })"
         />
-        <div
-          v-if="selectedItem.course.status === 'pending'"
-          class="drawer-actions"
-        >
-          <el-button
-            type="danger"
-            plain
-            @click="openReview(selectedItem, 'reject')"
-          >
-            驳回并给出意见
-          </el-button>
-          <el-button
-            type="success"
-            :icon="Check"
-            @click="openReview(selectedItem, 'approve')"
-          >
-            审核通过
-          </el-button>
-        </div>
-      </article>
-    </el-drawer>
+      </div>
 
-    <el-dialog
-      v-model="reviewDialogVisible"
-      :title="reviewAction === 'approve' ? '确认通过课程' : '驳回课程并反馈'"
-      width="min(500px, 92vw)"
-    >
-      <p class="dialog-course">{{ selectedItem?.course.title }}</p>
-      <el-input
-        v-model="reviewNote"
-        type="textarea"
-        :rows="4"
-        maxlength="2000"
-        show-word-limit
-        :placeholder="
-          reviewAction === 'approve'
-            ? '可选：记录审核依据或发布建议'
-            : '必填：请写明需要教师修改的具体内容'
+      <el-alert
+        v-if="loadError"
+        type="error"
+        show-icon
+        :closable="false"
+        :title="loadError"
+        class="error-alert"
+      >
+        <template #default>
+          <el-button link type="primary" :icon="Refresh" @click="loadQueue()">
+            重新加载
+          </el-button>
+        </template>
+      </el-alert>
+
+      <div class="table-shell">
+        <el-table v-loading="loading" :data="queue" row-key="course.id">
+          <el-table-column label="课程" min-width="280">
+            <template #default="{ row }">
+              <button
+                type="button"
+                class="course-cell"
+                @click="openDetail(row)"
+              >
+                <span class="course-monogram">{{
+                  row.course.title.slice(0, 1)
+                }}</span>
+                <span>
+                  <strong>{{ row.course.title }}</strong>
+                  <small
+                    >{{ row.course.category }} · {{ row.course.level }}</small
+                  >
+                </span>
+              </button>
+            </template>
+          </el-table-column>
+          <el-table-column label="授课教师" min-width="180">
+            <template #default="{ row }">
+              <strong>{{ row.course.teacher.displayName }}</strong>
+              <small class="muted">{{
+                row.course.teacher.school || '未填写机构'
+              }}</small>
+            </template>
+          </el-table-column>
+          <el-table-column label="提交/更新时间" min-width="180">
+            <template #default="{ row }">{{
+              formatTime(row.submittedAt)
+            }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag :type="statusMeta[row.course.status]?.type">
+                {{ statusMeta[row.course.status]?.label || row.course.status }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="260" fixed="right">
+            <template #default="{ row }">
+              <el-button @click="openDetail(row)">查看详情</el-button>
+              <template v-if="row.course.status === 'pending'">
+                <el-button
+                  type="success"
+                  plain
+                  @click="openReview(row, 'approve')"
+                >
+                  通过
+                </el-button>
+                <el-button
+                  type="danger"
+                  plain
+                  @click="openReview(row, 'reject')"
+                >
+                  驳回
+                </el-button>
+              </template>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty
+              :description="`暂无${statusMeta[status]?.label || ''}课程`"
+            />
+          </template>
+        </el-table>
+      </div>
+
+      <el-pagination
+        v-if="totalPages > 1"
+        class="pagination"
+        background
+        layout="prev, pager, next"
+        :page-size="pageSize"
+        :total="total"
+        :current-page="currentPage"
+        @current-change="
+          (page) => {
+            currentPage = page
+            loadQueue()
+          }
         "
       />
-      <template #footer>
-        <el-button @click="reviewDialogVisible = false">取消</el-button>
-        <el-button
-          :type="reviewAction === 'approve' ? 'success' : 'danger'"
-          :loading="reviewing"
-          @click="submitReview"
-        >
-          确认{{ reviewAction === 'approve' ? '通过' : '驳回' }}
-        </el-button>
-      </template>
-    </el-dialog>
+
+      <el-drawer v-model="detailVisible" size="min(620px, 94vw)">
+        <template #header>
+          <div>
+            <p class="drawer-eyebrow">REVIEW DETAILS</p>
+            <h2>{{ selectedItem?.course.title }}</h2>
+          </div>
+        </template>
+
+        <article v-if="selectedItem" class="review-detail">
+          <div class="detail-hero">
+            <span>{{ selectedItem.course.category }}</span>
+            <el-tag
+              :type="statusMeta[selectedItem.course.status]?.type"
+              effect="dark"
+            >
+              {{ statusMeta[selectedItem.course.status]?.label }}
+            </el-tag>
+          </div>
+          <section>
+            <h3>课程摘要</h3>
+            <p>{{ selectedItem.course.summary || '暂无摘要' }}</p>
+          </section>
+          <section>
+            <h3>详细介绍</h3>
+            <p class="pre-line">
+              {{ selectedItem.course.description || '暂无详细介绍' }}
+            </p>
+          </section>
+          <div class="facts">
+            <span>教师：{{ selectedItem.course.teacher.displayName }}</span>
+            <span>时长：{{ selectedItem.course.durationMinutes }} 分钟</span>
+            <span>容量：{{ selectedItem.course.capacity }} 人</span>
+            <span
+              >价格：¥{{
+                (selectedItem.course.priceCents / 100).toFixed(0)
+              }}</span
+            >
+          </div>
+          <el-alert
+            v-if="selectedItem.latestReview"
+            :type="
+              selectedItem.latestReview.decision === 'approved'
+                ? 'success'
+                : 'warning'
+            "
+            :title="`最近审核：${selectedItem.latestReview.note || '无备注'}`"
+            :closable="false"
+            show-icon
+          />
+          <div
+            v-if="selectedItem.course.status === 'pending'"
+            class="drawer-actions"
+          >
+            <el-button
+              type="danger"
+              plain
+              @click="openReview(selectedItem, 'reject')"
+            >
+              驳回并给出意见
+            </el-button>
+            <el-button
+              type="success"
+              :icon="Check"
+              @click="openReview(selectedItem, 'approve')"
+            >
+              审核通过
+            </el-button>
+          </div>
+        </article>
+      </el-drawer>
+
+      <el-dialog
+        v-model="reviewDialogVisible"
+        :title="reviewAction === 'approve' ? '确认通过课程' : '驳回课程并反馈'"
+        width="min(500px, 92vw)"
+      >
+        <p class="dialog-course">{{ selectedItem?.course.title }}</p>
+        <el-input
+          v-model="reviewNote"
+          type="textarea"
+          :rows="4"
+          maxlength="2000"
+          show-word-limit
+          :placeholder="
+            reviewAction === 'approve'
+              ? '可选：记录审核依据或发布建议'
+              : '必填：请写明需要教师修改的具体内容'
+          "
+        />
+        <template #footer>
+          <el-button @click="reviewDialogVisible = false">取消</el-button>
+          <el-button
+            :type="reviewAction === 'approve' ? 'success' : 'danger'"
+            :loading="reviewing"
+            @click="submitReview"
+          >
+            确认{{ reviewAction === 'approve' ? '通过' : '驳回' }}
+          </el-button>
+        </template>
+      </el-dialog>
+    </template>
+
+    <TeacherVerificationPanel v-else />
   </section>
 </template>
 
@@ -429,6 +462,33 @@ onMounted(() => loadQueue())
   justify-content: space-between;
   gap: 18px;
   margin: 22px 0;
+}
+
+.audit-domain-tabs {
+  display: inline-flex;
+  gap: 8px;
+  margin-top: 22px;
+  padding: 5px;
+  border: 1px solid #dce8ef;
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 8px 22px rgba(40, 82, 111, 0.06);
+}
+
+.audit-domain-tabs button {
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 10px;
+  color: #627b8f;
+  font-weight: 700;
+  background: transparent;
+  cursor: pointer;
+}
+
+.audit-domain-tabs button.active {
+  color: white;
+  background: linear-gradient(135deg, #1c6f9d, #3ea2b5);
+  box-shadow: 0 6px 14px rgba(30, 126, 163, 0.22);
 }
 
 .status-tabs {
@@ -583,6 +643,14 @@ onMounted(() => loadQueue())
   .audit-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .audit-domain-tabs {
+    display: flex;
+  }
+
+  .audit-domain-tabs button {
+    flex: 1;
   }
 
   .pending-badge {

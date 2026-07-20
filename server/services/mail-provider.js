@@ -12,6 +12,7 @@ export function createMailProvider({
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,
+    requireTLS: true,
     disableFileAccess: true,
     disableUrlAccess: true
   })

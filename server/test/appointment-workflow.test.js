@@ -200,6 +200,34 @@ test('a student request can be accepted atomically with a classroom, notificatio
     1
   )
 
+  database
+    .prepare('UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?')
+    .run(teacher.id)
+  const acceptWhileUnverified = await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/appointments/${appointmentId}/respond`,
+    headers: bearer(teacher.token),
+    payload: { action: 'accept' }
+  })
+  assert.equal(acceptWhileUnverified.statusCode, 409)
+  assert.equal(
+    database
+      .prepare('SELECT status FROM appointments WHERE id = ?')
+      .get(appointmentId).status,
+    'pending'
+  )
+  assert.equal(
+    database
+      .prepare(
+        'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
+      )
+      .get(appointmentId).count,
+    0
+  )
+  database
+    .prepare('UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?')
+    .run(new Date().toISOString(), teacher.id)
+
   const accepted = await app.inject({
     method: 'PATCH',
     url: `/api/v1/appointments/${appointmentId}/respond`,
@@ -510,6 +538,22 @@ test('a participant completes a classroom atomically while outsiders are rejecte
     headers: bearer(outsider.token)
   })
   assert.equal(forbidden.statusCode, 403)
+
+  const beforeOpening = await app.inject({
+    method: 'POST',
+    url: `/api/v1/classrooms/${classroomId}/complete`,
+    headers: bearer(student.token)
+  })
+  assert.equal(beforeOpening.statusCode, 409)
+
+  const openedAt = new Date().toISOString()
+  database
+    .prepare(
+      `UPDATE classrooms
+       SET status = 'open', opened_at = ?, updated_at = ?
+       WHERE id = ?`
+    )
+    .run(openedAt, openedAt, classroomId)
 
   const completed = await app.inject({
     method: 'POST',

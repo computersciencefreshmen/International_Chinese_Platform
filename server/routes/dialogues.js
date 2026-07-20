@@ -230,7 +230,10 @@ export async function dialogueRoutes(app) {
 
   app.post(
     '/api/v1/dialogues/:id/messages',
-    { preHandler: app.requireRole('student') },
+    {
+      preHandler: app.requireRole('student'),
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } }
+    },
     async (request, reply) => {
       const paramsResult = idSchema.safeParse(request.params)
       if (!paramsResult.success) return validationError(reply, paramsResult)
@@ -245,9 +248,14 @@ export async function dialogueRoutes(app) {
       if (!session) return responseError(reply, 404, '对话练习不存在')
 
       const turns = getTurns(db, session.id)
+      if (turns.length >= 100) {
+        return responseError(reply, 409, '本轮对话已达到上限，请创建新的练习')
+      }
       const generated = await provider.reply({
         keywords: parseKeywords(session.keywords_json),
-        history: turns.map(({ speaker, content }) => ({ speaker, content })),
+        history: turns
+          .slice(-20)
+          .map(({ speaker, content }) => ({ speaker, content })),
         message: bodyResult.data.message
       })
       const timestamp = new Date().toISOString()

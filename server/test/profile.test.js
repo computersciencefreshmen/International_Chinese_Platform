@@ -50,9 +50,9 @@ async function createTestApp(t) {
     `INSERT INTO teacher_profiles (
       user_id, school, title, experience_years, specialties_json,
       certificates_json, teaching_style_json, languages_json,
-      created_at, updated_at
-    ) VALUES (?, '初始学校', '讲师', 2, '["口语"]', '[]', '[]', '["中文"]', ?, ?)`
-  ).run(users.teacher.id, now, now)
+      verified_at, created_at, updated_at
+    ) VALUES (?, '初始学校', '讲师', 2, '["口语"]', '[]', '[]', '["中文"]', ?, ?, ?)`
+  ).run(users.teacher.id, now, now, now)
 
   await app.ready()
   t.after(async () => {
@@ -74,6 +74,7 @@ test('teacher can read and update professional profile fields atomically', async
   assert.equal(initial.statusCode, 200)
   assert.equal(initial.json().data.teacherProfile.school, '初始学校')
   assert.deepEqual(initial.json().data.teacherProfile.specialties, ['口语'])
+  assert.ok(initial.json().data.teacherProfile.verifiedAt)
 
   const updated = await app.inject({
     method: 'PATCH',
@@ -99,6 +100,7 @@ test('teacher can read and update professional profile fields atomically', async
     'HSK',
     '商务中文'
   ])
+  assert.equal(updated.json().data.teacherProfile.verifiedAt, null)
   assert.equal(
     db
       .prepare(
@@ -106,6 +108,16 @@ test('teacher can read and update professional profile fields atomically', async
       )
       .get(users.teacher.id).hourly_rate_cents,
     18800
+  )
+  assert.equal(
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM audit_logs
+         WHERE action = 'teacher.verification.reset' AND entity_id = ?`
+      )
+      .get(users.teacher.id).count,
+    1
   )
 })
 

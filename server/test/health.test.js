@@ -188,7 +188,7 @@ test('the built SPA is served only in production', async () => {
   assert.equal(developmentResponse.json().code, 'NOT_FOUND')
 
   const productionApp = await createApp({
-    config: { distDir, nodeEnv: 'production' }
+    config: { distDir, nodeEnv: 'production', rateLimitMax: 1 }
   })
   const productionResponse = await productionApp.inject({
     method: 'GET',
@@ -199,4 +199,23 @@ test('the built SPA is served only in production', async () => {
   assert.equal(productionResponse.statusCode, 200)
   assert.match(productionResponse.headers['content-type'], /^text\/html/)
   assert.equal(productionResponse.body, '<main>International Chinese</main>')
+
+  const repeatedNavigation = await productionApp.inject({
+    method: 'GET',
+    url: '/student/home',
+    headers: { accept: 'text/html' }
+  })
+  assert.equal(repeatedNavigation.statusCode, 200)
+
+  const firstApiResponse = await productionApp.inject({
+    method: 'GET',
+    url: '/api/v1/health'
+  })
+  const rateLimitedApiResponse = await productionApp.inject({
+    method: 'GET',
+    url: '/api/v1/health'
+  })
+
+  assert.equal(firstApiResponse.statusCode, 200)
+  assert.equal(rateLimitedApiResponse.statusCode, 429)
 })

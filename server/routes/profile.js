@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { URL } from 'node:url'
 
 import { z } from 'zod'
@@ -225,8 +226,21 @@ export async function profileRoutes(app) {
       const updatedAt = new Date().toISOString()
       assignments.push('updated_at = ?')
       values.push(updatedAt, request.auth.user.id)
+      let verificationReset = false
 
       const updateProfile = db.transaction(() => {
+        const verifiedProfile =
+          request.auth.user.role === 'teacher'
+            ? db
+                .prepare(
+                  `SELECT verified_at
+                   FROM teacher_profiles
+                   WHERE user_id = ? AND verified_at IS NOT NULL
+                   LIMIT 1`
+                )
+                .get(request.auth.user.id)
+            : null
+
         db.prepare(
           `UPDATE users SET ${assignments.join(', ')} WHERE id = ?`
         ).run(...values)
@@ -259,6 +273,35 @@ export async function profileRoutes(app) {
              SET ${teacherAssignments.join(', ')} WHERE user_id = ?`
           ).run(...teacherValues)
         }
+
+        if (verifiedProfile) {
+          const reset = db
+            .prepare(
+              `UPDATE teacher_profiles
+               SET verified_at = NULL, updated_at = ?
+               WHERE user_id = ? AND verified_at IS NOT NULL`
+            )
+            .run(updatedAt, request.auth.user.id)
+          verificationReset = reset.changes === 1
+
+          if (verificationReset) {
+            db.prepare(
+              `INSERT INTO audit_logs (
+                id, actor_id, action, entity_type, entity_id, details_json,
+                request_id, ip_address, user_agent, created_at
+              ) VALUES (?, ?, 'teacher.verification.reset', 'teacher', ?, ?, ?, ?, ?, ?)`
+            ).run(
+              randomUUID(),
+              request.auth.user.id,
+              request.auth.user.id,
+              JSON.stringify({ reason: 'profile_updated' }),
+              request.id ?? null,
+              request.ip ?? null,
+              request.headers['user-agent'] ?? null,
+              updatedAt
+            )
+          }
+        }
       })
       updateProfile()
 
@@ -266,7 +309,13 @@ export async function profileRoutes(app) {
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(request.auth.user.id)
 
-      return responseData(reply, profileData(db, user), '个人资料已更新')
+      return responseData(
+        reply,
+        profileData(db, user),
+        verificationReset
+          ? '个人资料已更新，教师认证需要重新审核'
+          : '个人资料已更新'
+      )
     }
   )
 

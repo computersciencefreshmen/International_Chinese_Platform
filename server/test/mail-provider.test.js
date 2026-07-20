@@ -29,6 +29,7 @@ test('SMTP mail provider sends the registration code with hardened transport opt
   assert.equal(result.messageId, 'test-message-id')
   assert.equal(transportOptions.disableFileAccess, true)
   assert.equal(transportOptions.disableUrlAccess, true)
+  assert.equal(transportOptions.requireTLS, true)
   assert.equal(message.to, 'student@example.test')
   assert.equal(message.from, 'Platform <no-reply@example.test>')
   assert.match(message.text, /123456/)

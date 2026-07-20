@@ -49,6 +49,17 @@ function isSpaNavigation(request) {
   )
 }
 
+function isServiceRequest(request) {
+  const pathname = request.url.split('?', 1)[0]
+
+  return (
+    pathname === '/api' ||
+    pathname.startsWith('/api/') ||
+    pathname === '/ws' ||
+    pathname.startsWith('/ws/')
+  )
+}
+
 function probeDatabase(database) {
   if (!database) return 'not_configured'
   const result = database.prepare('SELECT 1 AS ok').get()
@@ -89,7 +100,8 @@ export async function buildApp({
   await app.register(rateLimit, {
     global: true,
     max: config.rateLimitMax,
-    timeWindow: config.rateLimitWindow
+    timeWindow: config.rateLimitWindow,
+    allowList: (request) => !isServiceRequest(request)
   })
   await app.register(websocket)
   await app.register(multipart, {

@@ -12,7 +12,6 @@ const loadError = ref('')
 const search = ref('')
 const specialty = ref('')
 const minRating = ref(undefined)
-const verifiedOnly = ref(false)
 const page = ref(1)
 const pageSize = 8
 const total = ref(0)
@@ -39,8 +38,7 @@ const loadTeachers = async ({ resetPage = false } = {}) => {
       pageSize,
       search: search.value.trim() || undefined,
       specialty: specialty.value || undefined,
-      minRating: minRating.value || undefined,
-      verified: verifiedOnly.value ? 'true' : undefined
+      minRating: minRating.value || undefined
     })
     teachers.value = result?.items ?? []
     total.value = result?.pagination?.total ?? 0
@@ -61,7 +59,6 @@ const resetFilters = () => {
   search.value = ''
   specialty.value = ''
   minRating.value = undefined
-  verifiedOnly.value = false
   loadTeachers({ resetPage: true })
 }
 
@@ -112,13 +109,6 @@ onMounted(() => loadTeachers())
         <el-option label="4.5 分以上" :value="4.5" />
         <el-option label="4.8 分以上" :value="4.8" />
       </el-select>
-      <el-checkbox
-        v-model="verifiedOnly"
-        border
-        @change="loadTeachers({ resetPage: true })"
-      >
-        仅认证教师
-      </el-checkbox>
     </div>
 
     <el-alert
@@ -317,7 +307,7 @@ onMounted(() => loadTeachers())
 
 .filter-panel {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 180px 160px auto;
+  grid-template-columns: minmax(260px, 1fr) 180px 160px;
   gap: 12px;
   margin: 22px 0;
   padding: 14px;

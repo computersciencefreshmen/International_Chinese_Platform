@@ -121,6 +121,30 @@ test('register creates a cookie session without exposing its token', async (t) =
   assert.equal(anonymous.statusCode, 401)
 })
 
+test('teacher registration creates an active account pending administrator verification', async (t) => {
+  const { app, db } = await createAuthTestApp(t)
+  const response = await register(app, {
+    email: 'new-teacher@example.com',
+    role: 'teacher',
+    displayName: '新教师',
+    school: '国际中文学院',
+    certificates: ['国际中文教师证书']
+  })
+
+  assert.equal(response.statusCode, 201)
+  const teacher = db
+    .prepare(
+      `SELECT u.status, tp.verified_at
+       FROM users AS u
+       INNER JOIN teacher_profiles AS tp ON tp.user_id = u.id
+       WHERE u.email = ?`
+    )
+    .get('new-teacher@example.com')
+
+  assert.equal(teacher.status, 'active')
+  assert.equal(teacher.verified_at, null)
+})
+
 test('register rejects duplicate accounts and administrator self-registration', async (t) => {
   const { app } = await createAuthTestApp(t)
   const first = await register(app)

@@ -64,17 +64,24 @@ async function createCourseTestApp(t) {
     }
   }
 
+  const insertTeacherProfile = db.prepare(
+    `INSERT INTO teacher_profiles (user_id, verified_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?)`
+  )
+  insertTeacherProfile.run(accounts.teacher.id, now, now, now)
+  insertTeacherProfile.run(accounts.otherTeacher.id, now, now, now)
+
   await app.ready()
   t.after(async () => {
     await app.close()
     db.close()
   })
 
-  return { app, db, accounts }
+  return { app, db, accounts, now }
 }
 
 test('course workflow enforces ownership and closes the reject-revise-approve loop', async (t) => {
-  const { app, db, accounts } = await createCourseTestApp(t)
+  const { app, db, accounts, now } = await createCourseTestApp(t)
 
   const createdResponse = await app.inject({
     method: 'POST',
@@ -166,6 +173,19 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
     headers: accounts.otherTeacher.headers
   })
   assert.equal(otherTeacherSubmit.statusCode, 403)
+
+  db.prepare(
+    'UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?'
+  ).run(accounts.teacher.id)
+  const unverifiedSubmission = await app.inject({
+    method: 'POST',
+    url: `/api/v1/courses/${courseId}/submit`,
+    headers: accounts.teacher.headers
+  })
+  assert.equal(unverifiedSubmission.statusCode, 409)
+  db.prepare(
+    'UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?'
+  ).run(now, accounts.teacher.id)
 
   const firstSubmission = await app.inject({
     method: 'POST',
@@ -262,6 +282,20 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
   assert.equal(secondSubmission.json().data.status, 'pending')
   assert.equal(secondSubmission.json().data.rejectionReason, null)
 
+  db.prepare(
+    'UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?'
+  ).run(accounts.teacher.id)
+  const approvalWhileUnverified = await app.inject({
+    method: 'POST',
+    url: `/api/v1/admin/course-reviews/${courseId}`,
+    headers: accounts.administrator.headers,
+    payload: { action: 'approve', note: '不应通过' }
+  })
+  assert.equal(approvalWhileUnverified.statusCode, 409)
+  db.prepare(
+    'UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?'
+  ).run(now, accounts.teacher.id)
+
   const approvedResponse = await app.inject({
     method: 'POST',
     url: `/api/v1/admin/course-reviews/${courseId}`,
@@ -302,6 +336,30 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
   assert.equal(publicDetail.statusCode, 200)
   assert.equal(publicDetail.json().data.id, courseId)
   assert.equal(publicDetail.json().data.status, 'published')
+
+  db.prepare(
+    'UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?'
+  ).run(accounts.teacher.id)
+  const hiddenCatalog = await app.inject({
+    method: 'GET',
+    url: '/api/v1/courses',
+    headers: accounts.student.headers
+  })
+  assert.deepEqual(hiddenCatalog.json().data.items, [])
+  const hiddenPublicDetail = await app.inject({
+    method: 'GET',
+    url: `/api/v1/courses/${courseId}`
+  })
+  assert.equal(hiddenPublicDetail.statusCode, 404)
+  const ownerStillReadsCourse = await app.inject({
+    method: 'GET',
+    url: `/api/v1/courses/${courseId}`,
+    headers: accounts.teacher.headers
+  })
+  assert.equal(ownerStillReadsCourse.statusCode, 200)
+  db.prepare(
+    'UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?'
+  ).run(now, accounts.teacher.id)
 
   const studentMetrics = await app.inject({
     method: 'GET',

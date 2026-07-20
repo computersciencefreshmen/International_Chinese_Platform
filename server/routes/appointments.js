@@ -261,13 +261,20 @@ export async function appointmentRoutes(app) {
 
       const teacher = db
         .prepare(
-          `SELECT id FROM users
-           WHERE id = ? AND role = 'teacher' AND status = 'active'
+          `SELECT u.id, tp.verified_at
+           FROM users AS u
+           LEFT JOIN teacher_profiles AS tp ON tp.user_id = u.id
+           WHERE u.id = ? AND u.role = 'teacher' AND u.status = 'active'
            LIMIT 1`
         )
         .get(result.data.teacherId)
       if (!teacher) {
         return responseError(reply, 404, '教师不存在或当前不可预约')
+      }
+      if (!teacher.verified_at) {
+        return responseError(reply, 409, '该教师尚未通过平台认证，暂不可预约', {
+          verificationStatus: 'pending'
+        })
       }
 
       const courseId = result.data.courseId ?? null
@@ -463,6 +470,21 @@ export async function appointmentRoutes(app) {
         }
 
         if (result.data.action === 'accept') {
+          const eligibleTeacher = db
+            .prepare(
+              `SELECT 1
+               FROM users AS u
+               INNER JOIN teacher_profiles AS tp ON tp.user_id = u.id
+               WHERE u.id = ?
+                 AND u.status = 'active'
+                 AND tp.verified_at IS NOT NULL
+               LIMIT 1`
+            )
+            .get(appointment.teacher_id)
+          if (!eligibleTeacher) {
+            return { error: 'TEACHER_NOT_VERIFIED' }
+          }
+
           const conflict = db
             .prepare(
               `SELECT id, teacher_id, student_id FROM appointments
@@ -569,6 +591,13 @@ export async function appointmentRoutes(app) {
         return responseError(reply, 409, '只有待处理预约可以接受或拒绝', {
           status: outcome.status ?? null
         })
+      }
+      if (outcome.error === 'TEACHER_NOT_VERIFIED') {
+        return responseError(
+          reply,
+          409,
+          '教师身份认证当前无效，不能接受新的课堂预约'
+        )
       }
       if (outcome.error === 'SCHEDULE_CONFLICT') {
         return responseError(reply, 409, '该时间段与已接受的课堂冲突', {
@@ -709,7 +738,7 @@ export async function appointmentRoutes(app) {
         if (!participates) return { error: 'FORBIDDEN' }
         if (
           classroom.status !== 'accepted' ||
-          classroom.classroom_status === 'closed'
+          classroom.classroom_status !== 'open'
         ) {
           return {
             error: 'INVALID_STATE',
@@ -734,12 +763,11 @@ export async function appointmentRoutes(app) {
           .prepare(
             `UPDATE classrooms
              SET status = 'closed',
-                 opened_at = COALESCE(opened_at, ?),
                  closed_at = ?,
                  updated_at = ?
-             WHERE id = ? AND status IN ('scheduled', 'open')`
+             WHERE id = ? AND status = 'open'`
           )
-          .run(timestamp, timestamp, timestamp, classroom.classroom_id)
+          .run(timestamp, timestamp, classroom.classroom_id)
         if (classroomUpdated.changes !== 1) {
           throw lifecycleFailure('CLASSROOM_UPDATE_FAILED')
         }
@@ -791,7 +819,7 @@ export async function appointmentRoutes(app) {
         return responseError(reply, 403, '只有课堂参与者可以完成课堂')
       }
       if (outcome.error === 'INVALID_STATE') {
-        return responseError(reply, 409, '只有已接受且未关闭的课堂可以完成', {
+        return responseError(reply, 409, '只有已进入且仍在进行的课堂可以完成', {
           appointmentStatus: outcome.appointmentStatus,
           classroomStatus: outcome.classroomStatus
         })

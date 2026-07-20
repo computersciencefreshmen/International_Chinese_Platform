@@ -41,6 +41,35 @@ const reviewActionSchema = z
     }
   })
 
+const teacherVerificationQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).max(100000).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(12),
+    status: z.enum(['pending', 'verified']).default('pending'),
+    search: z.string().trim().max(100).optional()
+  })
+  .strict()
+
+const teacherIdParamsSchema = z.object({
+  teacherId: z.string().uuid('教师 ID 格式不正确')
+})
+
+const teacherVerificationActionSchema = z
+  .object({
+    action: z.enum(['approve', 'revoke']),
+    note: z.string().trim().max(2000).default('')
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.action === 'revoke' && value.note.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['note'],
+        message: '撤销教师认证时必须填写原因'
+      })
+    }
+  })
+
 const adminCourseColumns = `
   c.*,
   u.display_name AS teacher_name,
@@ -127,6 +156,60 @@ function parseJsonObject(value) {
       : {}
   } catch {
     return {}
+  }
+}
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const adminTeacherSelect = `
+  SELECT
+    u.id,
+    u.email,
+    u.display_name,
+    u.avatar_url,
+    u.country,
+    u.region,
+    u.status AS account_status,
+    u.created_at,
+    u.updated_at,
+    tp.school,
+    tp.title,
+    tp.experience_years,
+    tp.specialties_json,
+    tp.certificates_json,
+    tp.languages_json,
+    tp.verified_at,
+    tp.updated_at AS profile_updated_at
+  FROM users AS u
+  LEFT JOIN teacher_profiles AS tp ON tp.user_id = u.id
+`
+
+function teacherVerificationFromRow(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url ?? null,
+    country: row.country ?? null,
+    region: row.region ?? null,
+    accountStatus: row.account_status,
+    school: row.school ?? '',
+    title: row.title ?? '',
+    experienceYears: Number(row.experience_years ?? 0),
+    specialties: parseJsonArray(row.specialties_json),
+    certificates: parseJsonArray(row.certificates_json),
+    languages: parseJsonArray(row.languages_json),
+    verificationStatus: row.verified_at ? 'verified' : 'pending',
+    verifiedAt: row.verified_at ?? null,
+    registeredAt: row.created_at,
+    updatedAt: row.profile_updated_at ?? row.updated_at
   }
 }
 
@@ -232,7 +315,15 @@ export async function adminRoutes(app) {
 
       const reviewCourse = db.transaction(() => {
         const course = db
-          .prepare('SELECT * FROM courses WHERE id = ? LIMIT 1')
+          .prepare(
+            `SELECT c.*, u.status AS teacher_account_status,
+                    tp.verified_at AS teacher_verified_at
+             FROM courses AS c
+             INNER JOIN users AS u ON u.id = c.teacher_id
+             LEFT JOIN teacher_profiles AS tp ON tp.user_id = c.teacher_id
+             WHERE c.id = ?
+             LIMIT 1`
+          )
           .get(courseId)
 
         if (!course) {
@@ -242,6 +333,13 @@ export async function adminRoutes(app) {
           const error = new Error('COURSE_NOT_PENDING')
           error.currentStatus = course.status
           throw error
+        }
+        if (
+          action === 'approve' &&
+          (course.teacher_account_status !== 'active' ||
+            !course.teacher_verified_at)
+        ) {
+          throw new Error('COURSE_TEACHER_NOT_VERIFIED')
         }
 
         const updateResult = db
@@ -329,6 +427,13 @@ export async function adminRoutes(app) {
             requiredStatus: 'pending'
           })
         }
+        if (error?.message === 'COURSE_TEACHER_NOT_VERIFIED') {
+          return responseError(
+            reply,
+            409,
+            '课程教师当前未通过平台认证，不能批准发布'
+          )
+        }
         if (error?.message === 'COURSE_STATE_CHANGED') {
           return responseError(reply, 409, '课程状态已变化，请刷新后重试')
         }
@@ -349,6 +454,195 @@ export async function adminRoutes(app) {
           review: reviewFromRow(review)
         },
         action === 'approve' ? '课程已审核通过' : '课程已驳回'
+      )
+    }
+  )
+
+  app.get(
+    '/api/v1/admin/teacher-verifications',
+    { preHandler: app.requireRole('administrator') },
+    async (request, reply) => {
+      const result = teacherVerificationQuerySchema.safeParse(
+        request.query ?? {}
+      )
+      if (!result.success) {
+        return validationError(reply, result)
+      }
+
+      const { page, pageSize, status, search } = result.data
+      const where = ["u.role = 'teacher'", "u.status = 'active'"]
+      const parameters = []
+      where.push(
+        status === 'verified'
+          ? 'tp.verified_at IS NOT NULL'
+          : 'tp.verified_at IS NULL'
+      )
+      if (search) {
+        const pattern = `%${escapeLike(search)}%`
+        where.push(
+          "(u.display_name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\' OR COALESCE(tp.school, '') LIKE ? ESCAPE '\\' OR COALESCE(tp.title, '') LIKE ? ESCAPE '\\')"
+        )
+        parameters.push(pattern, pattern, pattern, pattern)
+      }
+
+      const whereClause = `WHERE ${where.join(' AND ')}`
+      const total = db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM users AS u
+           LEFT JOIN teacher_profiles AS tp ON tp.user_id = u.id
+           ${whereClause}`
+        )
+        .get(...parameters).count
+      const rows = db
+        .prepare(
+          `${adminTeacherSelect}
+           ${whereClause}
+           ORDER BY COALESCE(tp.updated_at, u.updated_at) ASC, u.id ASC
+           LIMIT ? OFFSET ?`
+        )
+        .all(...parameters, pageSize, (page - 1) * pageSize)
+
+      return responseData(reply, {
+        items: rows.map(teacherVerificationFromRow),
+        pagination: pagination(page, pageSize, total)
+      })
+    }
+  )
+
+  app.post(
+    '/api/v1/admin/teacher-verifications/:teacherId',
+    { preHandler: app.requireRole('administrator') },
+    async (request, reply) => {
+      const paramsResult = teacherIdParamsSchema.safeParse(request.params)
+      if (!paramsResult.success) {
+        return validationError(reply, paramsResult)
+      }
+
+      const bodyResult = teacherVerificationActionSchema.safeParse(
+        unwrapBody(request.body)
+      )
+      if (!bodyResult.success) {
+        return validationError(reply, bodyResult)
+      }
+
+      const teacherId = paramsResult.data.teacherId
+      const { action, note } = bodyResult.data
+      const decidedAt = new Date().toISOString()
+      const auditId = randomUUID()
+      const notificationId = randomUUID()
+      const nextStatus = action === 'approve' ? 'verified' : 'pending'
+
+      const decideVerification = db.transaction(() => {
+        const teacher = db
+          .prepare(
+            `SELECT u.id, u.status, u.display_name, tp.verified_at
+             FROM users AS u
+             LEFT JOIN teacher_profiles AS tp ON tp.user_id = u.id
+             WHERE u.id = ? AND u.role = 'teacher'
+             LIMIT 1`
+          )
+          .get(teacherId)
+
+        if (!teacher) {
+          throw new Error('TEACHER_NOT_FOUND')
+        }
+        if (teacher.status !== 'active') {
+          throw new Error('TEACHER_DISABLED')
+        }
+
+        const currentStatus = teacher.verified_at ? 'verified' : 'pending'
+        if (currentStatus === nextStatus) {
+          const error = new Error('VERIFICATION_STATE_UNCHANGED')
+          error.currentStatus = currentStatus
+          throw error
+        }
+
+        if (action === 'approve') {
+          db.prepare(
+            `INSERT INTO teacher_profiles (
+              user_id, verified_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+              verified_at = excluded.verified_at,
+              updated_at = excluded.updated_at`
+          ).run(teacherId, decidedAt, decidedAt, decidedAt)
+        } else {
+          db.prepare(
+            `UPDATE teacher_profiles
+             SET verified_at = NULL, updated_at = ?
+             WHERE user_id = ? AND verified_at IS NOT NULL`
+          ).run(decidedAt, teacherId)
+        }
+
+        db.prepare(
+          `INSERT INTO notifications (
+            id, user_id, type, title, body, resource_type, resource_id,
+            link, dedupe_key, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'teacher', ?, ?, ?, ?)`
+        ).run(
+          notificationId,
+          teacherId,
+          `teacher.verification.${action === 'approve' ? 'approved' : 'revoked'}`,
+          action === 'approve' ? '教师身份认证已通过' : '教师身份认证已撤销',
+          action === 'approve'
+            ? `您的教师身份已通过平台认证。${note ? `审核备注：${note}` : ''}`
+            : `您的教师身份认证已撤销。原因：${note}`,
+          teacherId,
+          '/teacher/user',
+          `teacher:${teacherId}:verification:${auditId}`,
+          decidedAt
+        )
+
+        db.prepare(
+          `INSERT INTO audit_logs (
+            id, actor_id, action, entity_type, entity_id, details_json,
+            request_id, ip_address, user_agent, created_at
+          ) VALUES (?, ?, ?, 'teacher', ?, ?, ?, ?, ?, ?)`
+        ).run(
+          auditId,
+          request.auth.user.id,
+          `teacher.verification.${action === 'approve' ? 'approved' : 'revoked'}`,
+          teacherId,
+          JSON.stringify({
+            previousStatus: currentStatus,
+            nextStatus,
+            note
+          }),
+          request.id ?? null,
+          request.ip ?? null,
+          request.headers['user-agent'] ?? null,
+          decidedAt
+        )
+      })
+
+      try {
+        decideVerification()
+      } catch (error) {
+        if (error?.message === 'TEACHER_NOT_FOUND') {
+          return responseError(reply, 404, '教师不存在')
+        }
+        if (error?.message === 'TEACHER_DISABLED') {
+          return responseError(reply, 409, '教师账号已停用，不能变更认证状态')
+        }
+        if (error?.message === 'VERIFICATION_STATE_UNCHANGED') {
+          return responseError(reply, 409, '教师认证状态未发生变化', {
+            currentStatus: error.currentStatus,
+            requiredAction:
+              error.currentStatus === 'verified' ? 'revoke' : 'approve'
+          })
+        }
+        throw error
+      }
+
+      const teacher = db
+        .prepare(`${adminTeacherSelect} WHERE u.id = ? LIMIT 1`)
+        .get(teacherId)
+
+      return responseData(
+        reply,
+        teacherVerificationFromRow(teacher),
+        action === 'approve' ? '教师认证已通过' : '教师认证已撤销'
       )
     }
   )

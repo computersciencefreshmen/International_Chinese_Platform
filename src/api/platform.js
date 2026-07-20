@@ -30,6 +30,20 @@ export const reviewCourse = (courseId, payload) =>
     data: payload
   })
 
+export const getTeacherVerificationQueue = (params = {}) =>
+  dataRequest({
+    method: 'GET',
+    url: '/admin/teacher-verifications',
+    params
+  })
+
+export const decideTeacherVerification = (teacherId, payload) =>
+  dataRequest({
+    method: 'POST',
+    url: `/admin/teacher-verifications/${teacherId}`,
+    data: payload
+  })
+
 export const getAdminMetrics = () =>
   dataRequest({ method: 'GET', url: '/admin/metrics' })
 

@@ -19,6 +19,8 @@ const replySchema = z
   .object({ reply: z.string().trim().min(1).max(4000) })
   .strict()
 
+const MAX_PROVIDER_RESPONSE_BYTES = 128 * 1024
+
 function localTitle(keywords) {
   return `${keywords.slice(0, 3).join(' · ')} 对话练习`
 }
@@ -58,6 +60,7 @@ async function requestExternal({ apiUrl, apiKey, payload, schema }) {
       ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
     },
     body: JSON.stringify(payload),
+    redirect: 'error',
     signal: AbortSignal.timeout(10_000)
   })
 
@@ -65,7 +68,23 @@ async function requestExternal({ apiUrl, apiKey, payload, schema }) {
     throw new Error(`AI provider returned HTTP ${response.status}`)
   }
 
-  return schema.parse(await response.json())
+  const declaredLength = Number(response.headers.get('content-length'))
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > MAX_PROVIDER_RESPONSE_BYTES
+  ) {
+    throw new Error('AI provider response exceeds the size limit')
+  }
+
+  const responseText = await response.text()
+  if (
+    new TextEncoder().encode(responseText).byteLength >
+    MAX_PROVIDER_RESPONSE_BYTES
+  ) {
+    throw new Error('AI provider response exceeds the size limit')
+  }
+
+  return schema.parse(JSON.parse(responseText))
 }
 
 export function createDialogueProvider({

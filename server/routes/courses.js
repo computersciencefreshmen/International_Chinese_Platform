@@ -69,9 +69,11 @@ const courseSelect = `
     c.*,
     u.display_name AS teacher_name,
     u.avatar_url AS teacher_avatar_url,
+    u.status AS teacher_account_status,
     tp.school AS teacher_school,
     tp.title AS teacher_title,
-    tp.rating AS teacher_rating
+    tp.rating AS teacher_rating,
+    tp.verified_at AS teacher_verified_at
   FROM courses AS c
   INNER JOIN users AS u ON u.id = c.teacher_id
   LEFT JOIN teacher_profiles AS tp ON tp.user_id = c.teacher_id
@@ -189,6 +191,14 @@ function canReadUnpublishedCourse(request, course) {
   return user.role === 'teacher' && user.id === course.teacher_id
 }
 
+function isPubliclyVisibleCourse(course) {
+  return (
+    course.status === 'published' &&
+    course.teacher_account_status === 'active' &&
+    Boolean(course.teacher_verified_at)
+  )
+}
+
 export async function courseRoutes(app) {
   const db = app.db
   if (!db) {
@@ -210,7 +220,11 @@ export async function courseRoutes(app) {
       const parameters = []
 
       if (!user || user.role === 'student') {
-        where.push("c.status = 'published'")
+        where.push(
+          "c.status = 'published'",
+          "u.status = 'active'",
+          'tp.verified_at IS NOT NULL'
+        )
       } else if (user.role === 'teacher') {
         where.push('c.teacher_id = ?')
         parameters.push(user.id)
@@ -242,6 +256,7 @@ export async function courseRoutes(app) {
           `SELECT COUNT(*) AS count
           FROM courses AS c
           INNER JOIN users AS u ON u.id = c.teacher_id
+          LEFT JOIN teacher_profiles AS tp ON tp.user_id = c.teacher_id
           ${whereClause}`
         )
         .get(...parameters).count
@@ -286,7 +301,7 @@ export async function courseRoutes(app) {
       }
 
       if (
-        course.status !== 'published' &&
+        !isPubliclyVisibleCourse(course) &&
         !canReadUnpublishedCourse(request, course)
       ) {
         if (request.auth?.user?.role === 'teacher') {
@@ -440,6 +455,25 @@ export async function courseRoutes(app) {
           currentStatus: course.status,
           allowedStatuses: ['draft', 'rejected']
         })
+      }
+
+      const verifiedTeacher = db
+        .prepare(
+          `SELECT 1
+           FROM teacher_profiles
+           WHERE user_id = ? AND verified_at IS NOT NULL
+           LIMIT 1`
+        )
+        .get(request.auth.user.id)
+      if (!verifiedTeacher) {
+        return responseError(
+          reply,
+          409,
+          '教师身份通过平台认证后才能提交课程审核',
+          {
+            verificationStatus: 'pending'
+          }
+        )
       }
 
       const submittedAt = new Date().toISOString()

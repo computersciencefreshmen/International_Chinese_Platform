@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { once } from 'node:events'
 import test from 'node:test'
 
 import cookie from '@fastify/cookie'
@@ -29,7 +30,13 @@ function addUser(database, { id = randomUUID(), role, displayName }) {
     .run(id, `${role}-${id}@example.com`, 'x'.repeat(64), role, displayName)
 
   const session = createSession(database, id, { ttlSeconds: 3600 })
-  return { id, role, displayName, token: session.token }
+  return {
+    id,
+    role,
+    displayName,
+    sessionId: session.id,
+    token: session.token
+  }
 }
 
 function addClassroom(database, studentId, teacherId, overrides = {}) {
@@ -243,6 +250,14 @@ test('a short-lived WebSocket ticket is consumed exactly once', async (t) => {
   assert.equal(socket.readyState, 1)
 
   await assert.rejects(app.injectWS(path), /Unexpected server response: 401/)
+
+  database
+    .prepare('UPDATE sessions SET revoked_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), student.sessionId)
+  const closed = once(socket, 'close')
+  socket.send(JSON.stringify({ type: 'ping', nonce: 'revoked-session' }))
+  const [closeCode] = await closed
+  assert.equal(closeCode, 1008)
 })
 
 test('two participants exchange a deduplicated message that remains in history', async (t) => {

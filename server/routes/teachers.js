@@ -5,11 +5,7 @@ const teacherListQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(50).default(12),
   search: z.string().trim().max(100).optional(),
   specialty: z.string().trim().max(80).optional(),
-  minRating: z.coerce.number().min(0).max(5).optional(),
-  verified: z
-    .enum(['true', 'false'])
-    .transform((value) => value === 'true')
-    .optional()
+  minRating: z.coerce.number().min(0).max(5).optional()
 })
 
 function responseData(reply, data, message = '操作成功', statusCode = 200) {
@@ -129,9 +125,12 @@ export async function teacherRoutes(app) {
       return validationError(reply, result)
     }
 
-    const { page, pageSize, search, specialty, minRating, verified } =
-      result.data
-    const conditions = ["u.role = 'teacher'", "u.status = 'active'"]
+    const { page, pageSize, search, specialty, minRating } = result.data
+    const conditions = [
+      "u.role = 'teacher'",
+      "u.status = 'active'",
+      'tp.verified_at IS NOT NULL'
+    ]
     const parameters = []
 
     if (search) {
@@ -153,12 +152,6 @@ export async function teacherRoutes(app) {
     if (minRating !== undefined) {
       conditions.push('COALESCE(tp.rating, 5) >= ?')
       parameters.push(minRating)
-    }
-
-    if (verified !== undefined) {
-      conditions.push(
-        verified ? 'tp.verified_at IS NOT NULL' : 'tp.verified_at IS NULL'
-      )
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`
@@ -203,6 +196,7 @@ export async function teacherRoutes(app) {
          WHERE u.id = ?
            AND u.role = 'teacher'
            AND u.status = 'active'
+           AND tp.verified_at IS NOT NULL
          GROUP BY u.id
          LIMIT 1`
       )

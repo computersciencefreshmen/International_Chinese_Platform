@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -15,6 +15,7 @@ import { hashPassword } from '../lib/password.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import fileRoutes from '../routes/files.js'
+import { loadConfig } from '../config.js'
 
 function authorization(token) {
   return { authorization: `Bearer ${token}` }
@@ -34,12 +35,27 @@ function multipartBody({ content, filename, mimeType }) {
   }
 }
 
-async function createTestApp(t) {
+function pngContent(sizeBytes = 48) {
+  const header = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52
+  ])
+  assert.ok(sizeBytes >= header.length)
+  return Buffer.concat([header, Buffer.alloc(sizeBytes - header.length, 0x61)])
+}
+
+async function createTestApp(t, uploadConfig = {}) {
   const uploadDir = await mkdtemp(join(tmpdir(), 'chinese-platform-files-'))
   const db = createDatabase({ filename: ':memory:' })
   const app = Fastify({ logger: false })
   app.decorate('db', db)
-  app.decorate('config', { uploadDir })
+  app.decorate('config', {
+    uploadDir,
+    uploadOwnerQuotaBytes: 250 * 1024 * 1024,
+    uploadTotalQuotaBytes: 5 * 1024 * 1024 * 1024,
+    uploadMaxConcurrent: 4,
+    ...uploadConfig
+  })
 
   await app.register(cookie)
   await app.register(multipart, {
@@ -56,13 +72,17 @@ async function createTestApp(t) {
   const now = new Date().toISOString()
   const passwordHash = await hashPassword('FileTest123!')
   const users = {}
-  for (const name of ['owner', 'other']) {
+  for (const [name, role] of [
+    ['owner', 'teacher'],
+    ['other', 'teacher'],
+    ['student', 'student']
+  ]) {
     const id = randomUUID()
     db.prepare(
       `INSERT INTO users (
         id, email, password_hash, role, display_name, status, created_at, updated_at
-      ) VALUES (?, ?, ?, 'teacher', ?, 'active', ?, ?)`
-    ).run(id, `${name}@file.test`, passwordHash, name, now, now)
+      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
+    ).run(id, `${name}@file.test`, passwordHash, role, name, now, now)
     users[name] = {
       id,
       token: createSession(db, id, { ttlSeconds: 3600 }).token
@@ -76,15 +96,12 @@ async function createTestApp(t) {
     await rm(uploadDir, { recursive: true, force: true })
   })
 
-  return { app, db, users }
+  return { app, db, uploadDir, users }
 }
 
 test('validated image upload is public while metadata and deletion remain owned', async (t) => {
   const { app, db, users } = await createTestApp(t)
-  const png = Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    Buffer.from('portfolio-image')
-  ])
+  const png = pngContent()
   const form = multipartBody({
     content: png,
     filename: '课程封面.png',
@@ -101,6 +118,7 @@ test('validated image upload is public while metadata and deletion remain owned'
     payload: form.body
   })
   assert.equal(upload.statusCode, 201)
+
   assert.equal(upload.json().data.mimeType, 'image/png')
   assert.equal(upload.json().data.ownerId, users.owner.id)
   assert.equal(upload.json().data.sha256.length, 64)
@@ -139,7 +157,7 @@ test('validated image upload is public while metadata and deletion remain owned'
 })
 
 test('magic-byte validation rejects disguised files and protects private material', async (t) => {
-  const { app, db, users } = await createTestApp(t)
+  const { app, db, uploadDir, users } = await createTestApp(t)
   const disguised = multipartBody({
     content: Buffer.from('%PDF-1.7 disguised as an image'),
     filename: 'avatar.png',
@@ -156,6 +174,24 @@ test('magic-byte validation rejects disguised files and protects private materia
   })
   assert.equal(invalid.statusCode, 415)
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM files').get().count, 0)
+  assert.deepEqual(await readdir(join(uploadDir, '.tmp')), [])
+
+  const signatureOnly = multipartBody({
+    content: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    filename: 'truncated.png',
+    mimeType: 'image/png'
+  })
+  const truncatedHeader = await app.inject({
+    method: 'POST',
+    url: '/api/v1/files?category=avatar',
+    headers: {
+      ...authorization(users.owner.token),
+      'content-type': signatureOnly.contentType
+    },
+    payload: signatureOnly.body
+  })
+  assert.equal(truncatedHeader.statusCode, 415)
+  assert.deepEqual(await readdir(join(uploadDir, '.tmp')), [])
 
   const pdf = Buffer.from('%PDF-1.7 portfolio material')
   const material = multipartBody({
@@ -163,6 +199,17 @@ test('magic-byte validation rejects disguised files and protects private materia
     filename: 'lesson.pdf',
     mimeType: 'application/pdf'
   })
+  const forbiddenStudentUpload = await app.inject({
+    method: 'POST',
+    url: '/api/v1/files?category=course_material',
+    headers: {
+      ...authorization(users.student.token),
+      'content-type': material.contentType
+    },
+    payload: material.body
+  })
+  assert.equal(forbiddenStudentUpload.statusCode, 403)
+
   const upload = await app.inject({
     method: 'POST',
     url: '/api/v1/files?category=course_material',
@@ -185,6 +232,144 @@ test('magic-byte validation rejects disguised files and protects private materia
     url: upload.json().data.url,
     headers: authorization(users.other.token)
   })
-  assert.equal(authenticatedContent.statusCode, 200)
-  assert.deepEqual(authenticatedContent.rawPayload, pdf)
+  assert.equal(authenticatedContent.statusCode, 403)
+
+  const ownerContent = await app.inject({
+    method: 'GET',
+    url: upload.json().data.url,
+    headers: authorization(users.owner.token)
+  })
+  assert.equal(ownerContent.statusCode, 200)
+  assert.deepEqual(ownerContent.rawPayload, pdf)
+})
+
+test('concurrent reservations prevent account and platform quota bypass', async (t) => {
+  const ownerLimited = await createTestApp(t, {
+    uploadOwnerQuotaBytes: 70,
+    uploadTotalQuotaBytes: 200,
+    uploadMaxConcurrent: 2
+  })
+  const png = pngContent(48)
+  const ownerUploads = await Promise.all(
+    ['first.png', 'second.png'].map(async (filename) => {
+      const form = multipartBody({
+        content: png,
+        filename,
+        mimeType: 'image/png'
+      })
+      return ownerLimited.app.inject({
+        method: 'POST',
+        url: '/api/v1/files?category=avatar',
+        headers: {
+          ...authorization(ownerLimited.users.owner.token),
+          'content-type': form.contentType
+        },
+        payload: form.body
+      })
+    })
+  )
+
+  assert.deepEqual(
+    ownerUploads.map((response) => response.statusCode).sort(),
+    [201, 413]
+  )
+  assert.equal(
+    ownerLimited.db.prepare('SELECT SUM(size_bytes) AS total FROM files').get()
+      .total,
+    48
+  )
+  assert.deepEqual(await readdir(join(ownerLimited.uploadDir, '.tmp')), [])
+
+  const platformLimited = await createTestApp(t, {
+    uploadOwnerQuotaBytes: 60,
+    uploadTotalQuotaBytes: 80,
+    uploadMaxConcurrent: 2
+  })
+  const platformUploads = await Promise.all(
+    [platformLimited.users.owner, platformLimited.users.other].map(
+      async (user, index) => {
+        const form = multipartBody({
+          content: png,
+          filename: `platform-${index}.png`,
+          mimeType: 'image/png'
+        })
+        return platformLimited.app.inject({
+          method: 'POST',
+          url: '/api/v1/files?category=avatar',
+          headers: {
+            ...authorization(user.token),
+            'content-type': form.contentType
+          },
+          payload: form.body
+        })
+      }
+    )
+  )
+
+  assert.deepEqual(
+    platformUploads.map((response) => response.statusCode).sort(),
+    [201, 507]
+  )
+  assert.equal(
+    platformLimited.db
+      .prepare('SELECT SUM(size_bytes) AS total FROM files')
+      .get().total,
+    48
+  )
+  assert.deepEqual(await readdir(join(platformLimited.uploadDir, '.tmp')), [])
+})
+
+test('the upload admission limit applies fail-fast process backpressure', async (t) => {
+  const { app, db, uploadDir, users } = await createTestApp(t, {
+    uploadOwnerQuotaBytes: 3 * 1024 * 1024,
+    uploadTotalQuotaBytes: 6 * 1024 * 1024,
+    uploadMaxConcurrent: 1
+  })
+  const png = pngContent(1024 * 1024)
+  const responses = await Promise.all(
+    ['one.png', 'two.png'].map(async (filename) => {
+      const form = multipartBody({
+        content: png,
+        filename,
+        mimeType: 'image/png'
+      })
+      return app.inject({
+        method: 'POST',
+        url: '/api/v1/files?category=avatar',
+        headers: {
+          ...authorization(users.owner.token),
+          'content-type': form.contentType
+        },
+        payload: form.body
+      })
+    })
+  )
+
+  assert.deepEqual(
+    responses.map((response) => response.statusCode).sort(),
+    [201, 503]
+  )
+  assert.equal(
+    responses.find((response) => response.statusCode === 503).headers[
+      'retry-after'
+    ],
+    '1'
+  )
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM files').get().count, 1)
+  assert.deepEqual(await readdir(join(uploadDir, '.tmp')), [])
+})
+
+test('upload resource configuration rejects malformed or unsafe limits', () => {
+  assert.throws(
+    () => loadConfig({ UPLOAD_MAX_CONCURRENT: '4workers' }),
+    /UPLOAD_MAX_CONCURRENT/
+  )
+  assert.throws(
+    () =>
+      loadConfig({
+        UPLOAD_OWNER_QUOTA_BYTES: '1024',
+        UPLOAD_TOTAL_QUOTA_BYTES: '512'
+      }),
+    /UPLOAD_TOTAL_QUOTA_BYTES/
+  )
 })

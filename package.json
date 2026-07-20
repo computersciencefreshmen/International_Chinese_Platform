@@ -28,8 +28,8 @@
     "test:api": "node --test \"server/test/*.test.js\"",
     "lint": "eslint . --fix",
     "lint:check": "eslint .",
-    "format": "prettier --write src/ server/ docs/",
-    "format:check": "prettier --check src/ server/ docs/",
+    "format": "prettier --write src/ server/ docs/ README.md README.en.md .github/",
+    "format:check": "prettier --check src/ server/ docs/ README.md README.en.md .github/",
     "check": "pnpm lint:check && pnpm format:check && pnpm test:api && pnpm build"
   },
   "dependencies": {

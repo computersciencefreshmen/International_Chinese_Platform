@@ -5,10 +5,14 @@ import { z } from 'zod'
 
 const TICKET_TTL_MS = 60_000
 const TICKET_SWEEP_INTERVAL_MS = 30_000
+const CONNECTION_SWEEP_INTERVAL_MS = 10_000
 const CLASSROOM_JOIN_EARLY_MS = 30 * 60 * 1000
 const CLASSROOM_JOIN_GRACE_MS = 2 * 60 * 60 * 1000
 const MAX_EVENT_BYTES = 64 * 1024
 const MAX_CHAT_LENGTH = 4000
+const MAX_CONNECTIONS_PER_USER = 3
+const EVENT_RATE_WINDOW_MS = 10_000
+const MAX_EVENTS_PER_WINDOW = 120
 
 const classroomParamsSchema = z
   .object({ id: z.string().uuid('课堂 ID 格式不正确') })
@@ -283,6 +287,7 @@ export async function realtimeRoutes(app) {
 
   const tickets = new Map()
   const rooms = new Map()
+  const connectionClaims = new WeakMap()
   const ticketClaim = Symbol('realtimeTicketClaim')
 
   function removeExpiredTickets(now = Date.now()) {
@@ -320,6 +325,7 @@ export async function realtimeRoutes(app) {
       users.set(claim.user.id, sockets)
     }
     sockets.add(socket)
+    connectionClaims.set(socket, claim)
     return firstForUser
   }
 
@@ -329,6 +335,7 @@ export async function realtimeRoutes(app) {
     if (!sockets) return false
 
     sockets.delete(socket)
+    connectionClaims.delete(socket)
     if (sockets.size > 0) return false
 
     users.delete(claim.user.id)
@@ -356,6 +363,61 @@ export async function realtimeRoutes(app) {
 
   function onlineParticipants(classroomId) {
     return [...(rooms.get(classroomId)?.keys() ?? [])]
+  }
+
+  function connectionCount(classroomId, userId) {
+    return rooms.get(classroomId)?.get(userId)?.size ?? 0
+  }
+
+  function claimCanAccessClassroom(claim) {
+    const now = new Date().toISOString()
+    const session = db
+      .prepare(
+        `SELECT session.id
+         FROM sessions AS session
+         INNER JOIN users AS user ON user.id = session.user_id
+         WHERE session.id = ?
+           AND session.user_id = ?
+           AND session.revoked_at IS NULL
+           AND session.expires_at > ?
+           AND user.status = 'active'
+         LIMIT 1`
+      )
+      .get(claim.sessionId, claim.user.id, now)
+    if (!session) return false
+
+    const classroom = findClassroom(db, claim.classroomId)
+    if (
+      !classroom ||
+      classroom.appointment_status !== 'accepted' ||
+      classroom.status === 'closed' ||
+      !isActiveParticipant(classroom, claim.user.id)
+    ) {
+      return false
+    }
+
+    return (
+      classroomJoinWindow(classroom).allowed ||
+      isDevelopmentDemoClassroom(app, classroom)
+    )
+  }
+
+  function closeStaleConnections() {
+    for (const users of rooms.values()) {
+      for (const sockets of users.values()) {
+        for (const socket of sockets) {
+          const claim = connectionClaims.get(socket)
+          if (!claim || !claimCanAccessClassroom(claim)) {
+            protocolError(
+              socket,
+              'CLASSROOM_ACCESS_REVOKED',
+              '课堂访问权限已失效'
+            )
+            socket.close(1008, 'Classroom access revoked')
+          }
+        }
+      }
+    }
   }
 
   function loadMessage(messageId) {
@@ -582,11 +644,20 @@ export async function realtimeRoutes(app) {
     protocolError(socket, 'UNKNOWN_EVENT', '不支持的课堂事件类型')
   }
 
-  const sweepTimer = setInterval(removeExpiredTickets, TICKET_SWEEP_INTERVAL_MS)
-  sweepTimer.unref()
+  const ticketSweepTimer = setInterval(
+    removeExpiredTickets,
+    TICKET_SWEEP_INTERVAL_MS
+  )
+  const connectionSweepTimer = setInterval(
+    closeStaleConnections,
+    CONNECTION_SWEEP_INTERVAL_MS
+  )
+  ticketSweepTimer.unref()
+  connectionSweepTimer.unref()
 
   app.addHook('onClose', async () => {
-    clearInterval(sweepTimer)
+    clearInterval(ticketSweepTimer)
+    clearInterval(connectionSweepTimer)
     tickets.clear()
     rooms.clear()
   })
@@ -632,6 +703,7 @@ export async function realtimeRoutes(app) {
       const expiresAt = Date.now() + TICKET_TTL_MS
       tickets.set(hash, {
         classroomId: classroom.id,
+        sessionId: request.auth.sessionId,
         user: participant,
         participantIds: [classroom.student_id, classroom.teacher_id],
         expiresAt
@@ -727,7 +799,8 @@ export async function realtimeRoutes(app) {
           classroom.status === 'closed' ||
           (!accessWindow.allowed &&
             !isDevelopmentDemoClassroom(app, classroom)) ||
-          !isActiveParticipant(classroom, claim.user.id)
+          !isActiveParticipant(classroom, claim.user.id) ||
+          !claimCanAccessClassroom(claim)
         ) {
           return responseError(reply, 403, '当前无法加入课堂')
         }
@@ -740,8 +813,39 @@ export async function realtimeRoutes(app) {
     (socket, request) => {
       const claim = request[ticketClaim]
       let cleanedUp = false
+      let eventWindowStartedAt = Date.now()
+      let eventCount = 0
+
+      if (
+        connectionCount(claim.classroomId, claim.user.id) >=
+        MAX_CONNECTIONS_PER_USER
+      ) {
+        protocolError(socket, 'CONNECTION_LIMIT', '课堂连接数量已达到上限')
+        socket.close(1008, 'Connection limit reached')
+        return
+      }
 
       socket.on('message', (data, isBinary) => {
+        const now = Date.now()
+        if (now - eventWindowStartedAt >= EVENT_RATE_WINDOW_MS) {
+          eventWindowStartedAt = now
+          eventCount = 0
+        }
+        eventCount += 1
+        if (eventCount > MAX_EVENTS_PER_WINDOW) {
+          protocolError(socket, 'EVENT_RATE_LIMIT', '课堂事件发送过于频繁')
+          socket.close(1008, 'Event rate limit exceeded')
+          return
+        }
+        if (!claimCanAccessClassroom(claim)) {
+          protocolError(
+            socket,
+            'CLASSROOM_ACCESS_REVOKED',
+            '课堂访问权限已失效'
+          )
+          socket.close(1008, 'Classroom access revoked')
+          return
+        }
         handleEvent(socket, claim, data, isBinary)
       })
 
