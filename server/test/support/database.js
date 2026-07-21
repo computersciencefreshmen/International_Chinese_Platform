@@ -8,7 +8,10 @@ import { seedDatabase } from '../../db/seed-data.js'
 
 const { Client } = pg
 
-export async function createTestDatabase({ seed = false } = {}) {
+export async function createTestDatabase({
+  seed = false,
+  migrate = true
+} = {}) {
   const connectionString =
     process.env.TEST_DATABASE_URL ||
     process.env.DATABASE_URL ||
@@ -23,7 +26,8 @@ export async function createTestDatabase({ seed = false } = {}) {
     connectionString,
     ssl: false,
     max: 4,
-    schema
+    schema,
+    migrate
   })
   if (seed) await seedDatabase(database)
 

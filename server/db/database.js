@@ -7,6 +7,8 @@ import pg from 'pg'
 const { Pool, types } = pg
 const transactionStorage = new AsyncLocalStorage()
 const migrationsDirectory = new URL('./migrations/', import.meta.url)
+const migrationLockNamespace = 'international-chinese-platform'
+const migrationLockName = 'schema-migrations'
 
 // Preserve the existing API wire format while PostgreSQL stores native types.
 types.setTypeParser(20, (value) => Number(value))
@@ -207,32 +209,43 @@ export async function migrateDatabase(database) {
     throw new TypeError('migrateDatabase requires an open PostgreSQL database')
   }
 
-  await database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      id text PRIMARY KEY,
-      applied_at timestamptz NOT NULL DEFAULT now()
-    )
-  `)
-  const applied = new Set(
-    (
-      await database
-        .prepare('SELECT id FROM schema_migrations ORDER BY applied_at, id')
-        .all()
-    ).map((row) => row.id)
-  )
+  const migrate = database.transaction(async () => {
+    // Extensions are database-global while test/application schemas are not.
+    // Serialize the entire migration sequence so parallel pools cannot race on
+    // CREATE EXTENSION or observe a partially applied schema.
+    await database
+      .prepare(
+        'SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?)) AS locked'
+      )
+      .get(migrationLockNamespace, migrationLockName)
 
-  for (const file of await migrationFiles()) {
-    const id = file.replace(/\.sql$/, '')
-    if (applied.has(id)) continue
-    const sql = await readFile(new URL(file, migrationsDirectory), 'utf8')
-    const apply = database.transaction(async () => {
+    await database.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id text PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    const applied = new Set(
+      (
+        await database
+          .prepare('SELECT id FROM schema_migrations ORDER BY applied_at, id')
+          .all()
+      ).map((row) => row.id)
+    )
+
+    for (const file of await migrationFiles()) {
+      const id = file.replace(/\.sql$/, '')
+      if (applied.has(id)) continue
+      const sql = await readFile(new URL(file, migrationsDirectory), 'utf8')
       await database.exec(sql)
       await database
         .prepare('INSERT INTO schema_migrations (id) VALUES (?)')
         .run(id)
-    })
-    await apply()
-  }
+      applied.add(id)
+    }
+  })
+
+  await migrate()
 
   return database
 }

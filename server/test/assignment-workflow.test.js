@@ -140,6 +140,17 @@ test('student submission, teacher grading and student result form a complete wor
   assert.equal(published.statusCode, 200)
   assert.equal(body(published).data.status, 'published')
 
+  const studentAssignmentList = await app.inject({
+    method: 'GET',
+    url: `/api/v1/courses/${courseId}/assignments`,
+    headers: student.headers
+  })
+  assert.equal(studentAssignmentList.statusCode, 200)
+  assert.equal(body(studentAssignmentList).data.items.length, 1)
+  assert.equal(body(studentAssignmentList).data.items[0].id, assignmentId)
+  assert.equal(body(studentAssignmentList).data.items[0].questionCount, 2)
+  assert.equal(body(studentAssignmentList).data.items[0].submission, null)
+
   const studentDetail = await app.inject({
     method: 'GET',
     url: `/api/v1/assignments/${assignmentId}`,

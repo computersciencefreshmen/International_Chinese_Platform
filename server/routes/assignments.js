@@ -559,7 +559,7 @@ export async function assignmentRoutes(app) {
             LEFT JOIN submissions AS s
               ON s.assignment_id = a.id AND s.student_id = ?
             WHERE a.course_id = ? AND a.status = 'published'
-            GROUP BY a.id
+            GROUP BY a.id, s.id
             ORDER BY a.due_at IS NULL, a.due_at ASC, a.created_at DESC`
           )
           .all(userId, course.id)

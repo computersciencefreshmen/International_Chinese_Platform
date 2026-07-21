@@ -81,6 +81,29 @@ test('numbered migrations are idempotent', async (t) => {
   assert.equal(row.count, MIGRATION_IDS.length)
 })
 
+test('concurrent migration runners serialize across pools and schemas', async (t) => {
+  const databases = await Promise.all([
+    createTestDatabase({ migrate: false }),
+    createTestDatabase({ migrate: false })
+  ])
+  t.after(async () =>
+    Promise.all(databases.map((database) => database.close()))
+  )
+
+  await Promise.all([
+    migrateDatabase(databases[0]),
+    migrateDatabase(databases[0]),
+    migrateDatabase(databases[1])
+  ])
+
+  for (const database of databases) {
+    const row = await database
+      .prepare('SELECT COUNT(*) AS count FROM schema_migrations')
+      .get()
+    assert.equal(row.count, MIGRATION_IDS.length)
+  }
+})
+
 test('demo seed is idempotent and stores all account passwords as scrypt hashes', async (t) => {
   const database = await createTestDatabase()
   t.after(async () => database.close())
