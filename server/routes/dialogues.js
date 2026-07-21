@@ -81,8 +81,8 @@ function sessionData(row) {
   }
 }
 
-function findOwnedSession(db, sessionId, studentId) {
-  return db
+async function findOwnedSession(db, sessionId, studentId) {
+  return await db
     .prepare(
       `SELECT * FROM dialogue_sessions
        WHERE id = ? AND student_id = ? LIMIT 1`
@@ -90,8 +90,8 @@ function findOwnedSession(db, sessionId, studentId) {
     .get(sessionId, studentId)
 }
 
-function getTurns(db, sessionId) {
-  return db
+async function getTurns(db, sessionId) {
+  return await db
     .prepare(
       `SELECT * FROM dialogue_turns
        WHERE session_id = ? ORDER BY position ASC`
@@ -118,13 +118,15 @@ export async function dialogueRoutes(app) {
       const { page, pageSize } = result.data
       const studentId = request.auth.user.id
       const total = Number(
-        db
-          .prepare(
-            'SELECT COUNT(*) AS count FROM dialogue_sessions WHERE student_id = ?'
-          )
-          .get(studentId).count
+        (
+          await db
+            .prepare(
+              'SELECT COUNT(*) AS count FROM dialogue_sessions WHERE student_id = ?'
+            )
+            .get(studentId)
+        ).count
       )
-      const rows = db
+      const rows = await db
         .prepare(
           `SELECT
             s.*,
@@ -165,28 +167,30 @@ export async function dialogueRoutes(app) {
       const generated = await provider.generate(result.data)
       const sessionId = randomUUID()
       const timestamp = new Date().toISOString()
-      const create = db.transaction(() => {
-        db.prepare(
-          `INSERT INTO dialogue_sessions (
+      const create = db.transaction(async () => {
+        await db
+          .prepare(
+            `INSERT INTO dialogue_sessions (
             id, student_id, title, keywords_json, provider, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).run(
-          sessionId,
-          request.auth.user.id,
-          generated.title,
-          JSON.stringify(result.data.keywords),
-          generated.provider,
-          timestamp,
-          timestamp
-        )
+          )
+          .run(
+            sessionId,
+            request.auth.user.id,
+            generated.title,
+            JSON.stringify(result.data.keywords),
+            generated.provider,
+            timestamp,
+            timestamp
+          )
 
         const insertTurn = db.prepare(
           `INSERT INTO dialogue_turns (
             id, session_id, position, speaker, content, created_at
           ) VALUES (?, ?, ?, ?, ?, ?)`
         )
-        generated.turns.forEach((turn, index) => {
-          insertTurn.run(
+        for (const [index, turn] of generated.turns.entries()) {
+          await insertTurn.run(
             randomUUID(),
             sessionId,
             index + 1,
@@ -194,16 +198,20 @@ export async function dialogueRoutes(app) {
             turn.content,
             timestamp
           )
-        })
+        }
       })
-      create()
+      await create()
 
-      const session = findOwnedSession(db, sessionId, request.auth.user.id)
+      const session = await findOwnedSession(
+        db,
+        sessionId,
+        request.auth.user.id
+      )
       return responseData(
         reply,
         {
           ...sessionData(session),
-          turns: getTurns(db, sessionId).map(turnData)
+          turns: (await getTurns(db, sessionId)).map(turnData)
         },
         '对话练习已生成',
         201
@@ -218,9 +226,13 @@ export async function dialogueRoutes(app) {
       const result = idSchema.safeParse(request.params)
       if (!result.success) return validationError(reply, result)
 
-      const session = findOwnedSession(db, result.data.id, request.auth.user.id)
+      const session = await findOwnedSession(
+        db,
+        result.data.id,
+        request.auth.user.id
+      )
       if (!session) return responseError(reply, 404, '对话练习不存在')
-      const turns = getTurns(db, session.id)
+      const turns = await getTurns(db, session.id)
       return responseData(reply, {
         ...sessionData({ ...session, turn_count: turns.length }),
         turns: turns.map(turnData)
@@ -240,14 +252,14 @@ export async function dialogueRoutes(app) {
       const bodyResult = messageSchema.safeParse(unwrapBody(request.body))
       if (!bodyResult.success) return validationError(reply, bodyResult)
 
-      const session = findOwnedSession(
+      const session = await findOwnedSession(
         db,
         paramsResult.data.id,
         request.auth.user.id
       )
       if (!session) return responseError(reply, 404, '对话练习不存在')
 
-      const turns = getTurns(db, session.id)
+      const turns = await getTurns(db, session.id)
       if (turns.length >= 100) {
         return responseError(reply, 409, '本轮对话已达到上限，请创建新的练习')
       }
@@ -259,16 +271,22 @@ export async function dialogueRoutes(app) {
         message: bodyResult.data.message
       })
       const timestamp = new Date().toISOString()
-      const append = db.transaction(() => {
-        const current = findOwnedSession(db, session.id, request.auth.user.id)
+      const append = db.transaction(async () => {
+        const current = await findOwnedSession(
+          db,
+          session.id,
+          request.auth.user.id
+        )
         if (!current) return null
         const position = Number(
-          db
-            .prepare(
-              `SELECT COALESCE(MAX(position), 0) AS position
+          (
+            await db
+              .prepare(
+                `SELECT COALESCE(MAX(position), 0) AS position
                FROM dialogue_turns WHERE session_id = ?`
-            )
-            .get(session.id).position
+              )
+              .get(session.id)
+          ).position
         )
         const studentTurn = {
           id: randomUUID(),
@@ -288,7 +306,7 @@ export async function dialogueRoutes(app) {
           ) VALUES (?, ?, ?, ?, ?, ?)`
         )
         for (const turn of [studentTurn, tutorTurn]) {
-          insert.run(
+          await insert.run(
             turn.id,
             session.id,
             turn.position,
@@ -297,14 +315,16 @@ export async function dialogueRoutes(app) {
             timestamp
           )
         }
-        db.prepare(
-          `UPDATE dialogue_sessions
+        await db
+          .prepare(
+            `UPDATE dialogue_sessions
            SET provider = ?, updated_at = ? WHERE id = ?`
-        ).run(generated.provider, timestamp, session.id)
+          )
+          .run(generated.provider, timestamp, session.id)
         return { studentTurn, tutorTurn }
       })
 
-      const appended = append()
+      const appended = await append()
       if (!appended)
         return responseError(reply, 409, '对话状态已变化，请刷新重试')
       return responseData(reply, {

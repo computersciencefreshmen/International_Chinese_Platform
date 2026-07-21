@@ -5,7 +5,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { hashPassword } from '../lib/password.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
@@ -17,7 +17,7 @@ function authorization(token) {
 }
 
 async function createCourseTestApp(t) {
-  const db = createDatabase({ filename: ':memory:' })
+  const db = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', db)
 
@@ -47,7 +47,7 @@ async function createCourseTestApp(t) {
     ['administrator', 'administrator', '审核员']
   ]) {
     const id = randomUUID()
-    insertUser.run(
+    await insertUser.run(
       id,
       `${key.toLowerCase()}@course.test`,
       passwordHash,
@@ -56,7 +56,7 @@ async function createCourseTestApp(t) {
       now,
       now
     )
-    const session = createSession(db, id, { ttlSeconds: 3600 })
+    const session = await createSession(db, id, { ttlSeconds: 3600 })
     accounts[key] = {
       id,
       role,
@@ -68,13 +68,13 @@ async function createCourseTestApp(t) {
     `INSERT INTO teacher_profiles (user_id, verified_at, created_at, updated_at)
      VALUES (?, ?, ?, ?)`
   )
-  insertTeacherProfile.run(accounts.teacher.id, now, now, now)
-  insertTeacherProfile.run(accounts.otherTeacher.id, now, now, now)
+  await insertTeacherProfile.run(accounts.teacher.id, now, now, now)
+  await insertTeacherProfile.run(accounts.otherTeacher.id, now, now, now)
 
   await app.ready()
   t.after(async () => {
     await app.close()
-    db.close()
+    await db.close()
   })
 
   return { app, db, accounts, now }
@@ -174,18 +174,18 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
   })
   assert.equal(otherTeacherSubmit.statusCode, 403)
 
-  db.prepare(
-    'UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?'
-  ).run(accounts.teacher.id)
+  await db
+    .prepare('UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?')
+    .run(accounts.teacher.id)
   const unverifiedSubmission = await app.inject({
     method: 'POST',
     url: `/api/v1/courses/${courseId}/submit`,
     headers: accounts.teacher.headers
   })
   assert.equal(unverifiedSubmission.statusCode, 409)
-  db.prepare(
-    'UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?'
-  ).run(now, accounts.teacher.id)
+  await db
+    .prepare('UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?')
+    .run(now, accounts.teacher.id)
 
   const firstSubmission = await app.inject({
     method: 'POST',
@@ -245,19 +245,23 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
     /作业评价标准/
   )
   assert.equal(
-    db
-      .prepare(
-        "SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND type = 'course.rejected'"
-      )
-      .get(accounts.teacher.id).count,
+    (
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND type = 'course.rejected'"
+        )
+        .get(accounts.teacher.id)
+    ).count,
     1
   )
   assert.equal(
-    db
-      .prepare(
-        "SELECT COUNT(*) AS count FROM audit_logs WHERE entity_id = ? AND action = 'course.rejected'"
-      )
-      .get(courseId).count,
+    (
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE entity_id = ? AND action = 'course.rejected'"
+        )
+        .get(courseId)
+    ).count,
     1
   )
 
@@ -282,9 +286,9 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
   assert.equal(secondSubmission.json().data.status, 'pending')
   assert.equal(secondSubmission.json().data.rejectionReason, null)
 
-  db.prepare(
-    'UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?'
-  ).run(accounts.teacher.id)
+  await db
+    .prepare('UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?')
+    .run(accounts.teacher.id)
   const approvalWhileUnverified = await app.inject({
     method: 'POST',
     url: `/api/v1/admin/course-reviews/${courseId}`,
@@ -292,9 +296,9 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
     payload: { action: 'approve', note: '不应通过' }
   })
   assert.equal(approvalWhileUnverified.statusCode, 409)
-  db.prepare(
-    'UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?'
-  ).run(now, accounts.teacher.id)
+  await db
+    .prepare('UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?')
+    .run(now, accounts.teacher.id)
 
   const approvedResponse = await app.inject({
     method: 'POST',
@@ -337,9 +341,9 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
   assert.equal(publicDetail.json().data.id, courseId)
   assert.equal(publicDetail.json().data.status, 'published')
 
-  db.prepare(
-    'UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?'
-  ).run(accounts.teacher.id)
+  await db
+    .prepare('UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?')
+    .run(accounts.teacher.id)
   const hiddenCatalog = await app.inject({
     method: 'GET',
     url: '/api/v1/courses',
@@ -357,9 +361,9 @@ test('course workflow enforces ownership and closes the reject-revise-approve lo
     headers: accounts.teacher.headers
   })
   assert.equal(ownerStillReadsCourse.statusCode, 200)
-  db.prepare(
-    'UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?'
-  ).run(now, accounts.teacher.id)
+  await db
+    .prepare('UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?')
+    .run(now, accounts.teacher.id)
 
   const studentMetrics = await app.inject({
     method: 'GET',

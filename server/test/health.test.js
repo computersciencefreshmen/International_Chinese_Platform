@@ -25,7 +25,8 @@ async function createApp(options = {}) {
       rateLimitMax: 1000,
       ...options.config
     },
-    database: options.database
+    database: options.database,
+    objectStorage: options.objectStorage ?? null
   })
 
   apps.push(app)
@@ -76,10 +77,10 @@ test('GET /api/v1/ready checks the injected database', async () => {
   assert.equal(response.statusCode, 200)
   assert.deepEqual(response.json(), {
     code: 0,
-    msg: 'ready',
+    msg: 'degraded',
     data: {
-      status: 'ready',
-      checks: { database: 'up' }
+      status: 'degraded',
+      checks: { database: 'up', storage: 'not_configured' }
     }
   })
   assert.equal(probeCount, 1)
@@ -99,7 +100,7 @@ test('GET /api/v1/ready fails when no database is configured', async () => {
     msg: 'Service is not ready',
     data: {
       status: 'not_ready',
-      checks: { database: 'not_configured' }
+      checks: { database: 'not_configured', storage: 'not_configured' }
     }
   })
 })
@@ -123,7 +124,7 @@ test('GET /api/v1/ready returns a sanitized failure when the database is down', 
     msg: 'Service is not ready',
     data: {
       status: 'not_ready',
-      checks: { database: 'down' }
+      checks: { database: 'down', storage: 'not_configured' }
     }
   })
   assert.doesNotMatch(response.body, /secret|stack|\.data/i)

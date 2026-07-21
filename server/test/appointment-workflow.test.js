@@ -5,7 +5,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import appointmentRoutes from '../routes/appointments.js'
@@ -19,8 +19,8 @@ function bearer(token) {
   return { authorization: `Bearer ${token}` }
 }
 
-function addUser(database, { id = randomUUID(), role, displayName }) {
-  database
+async function addUser(database, { id = randomUUID(), role, displayName }) {
+  await database
     .prepare(
       `INSERT INTO users (
         id, email, password_hash, role, display_name, status
@@ -28,12 +28,12 @@ function addUser(database, { id = randomUUID(), role, displayName }) {
     )
     .run(id, `${role}-${id}@example.com`, 'x'.repeat(64), role, displayName)
 
-  const session = createSession(database, id, { ttlSeconds: 3600 })
+  const session = await createSession(database, id, { ttlSeconds: 3600 })
   return { id, role, displayName, token: session.token }
 }
 
-function addTeacherProfile(database, teacherId, overrides = {}) {
-  database
+async function addTeacherProfile(database, teacherId, overrides = {}) {
+  await database
     .prepare(
       `INSERT INTO teacher_profiles (
         user_id, school, title, experience_years, rating,
@@ -56,9 +56,9 @@ function addTeacherProfile(database, teacherId, overrides = {}) {
     )
 }
 
-function addCourse(database, teacherId, overrides = {}) {
+async function addCourse(database, teacherId, overrides = {}) {
   const id = overrides.id ?? randomUUID()
-  database
+  await database
     .prepare(
       `INSERT INTO courses (
         id, teacher_id, title, summary, level, category,
@@ -85,7 +85,7 @@ function futureIso(minutesFromNow) {
 }
 
 async function createTestApp(t) {
-  const database = createDatabase({ filename: ':memory:' })
+  const database = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', database)
 
@@ -101,7 +101,7 @@ async function createTestApp(t) {
 
   t.after(async () => {
     await app.close()
-    database.close()
+    await database.close()
   })
 
   return { app, database }
@@ -131,13 +131,16 @@ async function requestAppointment(
 
 test('teacher discovery exposes active teachers and only their published courses', async (t) => {
   const { app, database } = await createTestApp(t)
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '陈老师'
   })
-  addTeacherProfile(database, teacher.id, { specialties: ['商务汉语'] })
-  const publishedCourseId = addCourse(database, teacher.id)
-  addCourse(database, teacher.id, { status: 'draft', title: '未发布课程' })
+  await addTeacherProfile(database, teacher.id, { specialties: ['商务汉语'] })
+  const publishedCourseId = await addCourse(database, teacher.id)
+  await addCourse(database, teacher.id, {
+    status: 'draft',
+    title: '未发布课程'
+  })
 
   const listing = await app.inject({
     method: 'GET',
@@ -164,16 +167,16 @@ test('teacher discovery exposes active teachers and only their published courses
 
 test('a student request can be accepted atomically with a classroom, notifications and audit', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '学习者甲'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '教师甲'
   })
-  addTeacherProfile(database, teacher.id)
-  const courseId = addCourse(database, teacher.id)
+  await addTeacherProfile(database, teacher.id)
+  const courseId = await addCourse(database, teacher.id)
 
   const created = await requestAppointment(app, student, teacher, courseId, {
     scheduledStart: futureIso(10)
@@ -182,25 +185,29 @@ test('a student request can be accepted atomically with a classroom, notificatio
   const appointmentId = readBody(created).data.id
   assert.equal(readBody(created).data.status, 'pending')
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE resource_id = ? AND type = 'appointment.requested'`
-      )
-      .get(appointmentId).count,
+        )
+        .get(appointmentId)
+    ).count,
     1
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'appointment.requested' AND entity_id = ?`
-      )
-      .get(appointmentId).count,
+        )
+        .get(appointmentId)
+    ).count,
     1
   )
 
-  database
+  await database
     .prepare('UPDATE teacher_profiles SET verified_at = NULL WHERE user_id = ?')
     .run(teacher.id)
   const acceptWhileUnverified = await app.inject({
@@ -211,20 +218,24 @@ test('a student request can be accepted atomically with a classroom, notificatio
   })
   assert.equal(acceptWhileUnverified.statusCode, 409)
   assert.equal(
-    database
-      .prepare('SELECT status FROM appointments WHERE id = ?')
-      .get(appointmentId).status,
+    (
+      await database
+        .prepare('SELECT status FROM appointments WHERE id = ?')
+        .get(appointmentId)
+    ).status,
     'pending'
   )
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
-      )
-      .get(appointmentId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
+        )
+        .get(appointmentId)
+    ).count,
     0
   )
-  database
+  await database
     .prepare('UPDATE teacher_profiles SET verified_at = ? WHERE user_id = ?')
     .run(new Date().toISOString(), teacher.id)
 
@@ -241,21 +252,25 @@ test('a student request can be accepted atomically with a classroom, notificatio
   assert.equal(acceptedData.responseNote, '课堂见。')
   assert.match(acceptedData.classroom.roomCode, /^[A-Za-z0-9_-]{6,64}$/)
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE resource_type = 'appointment' AND resource_id = ?`
-      )
-      .get(appointmentId).count,
+        )
+        .get(appointmentId)
+    ).count,
     3
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'appointment.accepted' AND entity_id = ?`
-      )
-      .get(appointmentId).count,
+        )
+        .get(appointmentId)
+    ).count,
     1
   )
 
@@ -278,16 +293,16 @@ test('a student request can be accepted atomically with a classroom, notificatio
 
 test('teachers can reject pending requests and either participant can cancel an active request', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '学习者乙'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '教师乙'
   })
-  addTeacherProfile(database, teacher.id)
-  const courseId = addCourse(database, teacher.id)
+  await addTeacherProfile(database, teacher.id)
+  const courseId = await addCourse(database, teacher.id)
 
   const rejectedRequest = await requestAppointment(
     app,
@@ -306,11 +321,13 @@ test('teachers can reject pending requests and either participant can cancel an 
   assert.equal(rejected.statusCode, 200)
   assert.equal(readBody(rejected).data.status, 'rejected')
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
-      )
-      .get(rejectedId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
+        )
+        .get(rejectedId)
+    ).count,
     0
   )
 
@@ -358,16 +375,16 @@ test('teachers can reject pending requests and either participant can cancel an 
 
 test('accepting an overlapping lesson is rejected without partial side effects', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '学习者丙'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '教师丙'
   })
-  addTeacherProfile(database, teacher.id)
-  const courseId = addCourse(database, teacher.id)
+  await addTeacherProfile(database, teacher.id)
+  const courseId = await addCourse(database, teacher.id)
   const sharedStart = futureIso(720)
 
   const first = await requestAppointment(app, student, teacher, courseId, {
@@ -402,39 +419,43 @@ test('accepting an overlapping lesson is rejected without partial side effects',
   assert.equal(conflicted.statusCode, 409)
   assert.equal(readBody(conflicted).data.conflictingAppointmentId, firstId)
   assert.equal(
-    database
-      .prepare('SELECT status FROM appointments WHERE id = ?')
-      .get(secondId).status,
+    (
+      await database
+        .prepare('SELECT status FROM appointments WHERE id = ?')
+        .get(secondId)
+    ).status,
     'pending'
   )
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
-      )
-      .get(secondId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
+        )
+        .get(secondId)
+    ).count,
     0
   )
 })
 
 test('a student cannot be accepted into overlapping lessons with different teachers', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '档期冲突学生'
   })
-  const firstTeacher = addUser(database, {
+  const firstTeacher = await addUser(database, {
     role: 'teacher',
     displayName: '第一位教师'
   })
-  const secondTeacher = addUser(database, {
+  const secondTeacher = await addUser(database, {
     role: 'teacher',
     displayName: '第二位教师'
   })
-  addTeacherProfile(database, firstTeacher.id)
-  addTeacherProfile(database, secondTeacher.id)
-  const firstCourseId = addCourse(database, firstTeacher.id)
-  const secondCourseId = addCourse(database, secondTeacher.id)
+  await addTeacherProfile(database, firstTeacher.id)
+  await addTeacherProfile(database, secondTeacher.id)
+  const firstCourseId = await addCourse(database, firstTeacher.id)
+  const secondCourseId = await addCourse(database, secondTeacher.id)
   const sharedStart = futureIso(780)
 
   const first = await requestAppointment(
@@ -482,46 +503,52 @@ test('a student cannot be accepted into overlapping lessons with different teach
   assert.equal(readBody(conflicted).data.conflictingAppointmentId, firstId)
   assert.equal(readBody(conflicted).data.conflictingParticipant, 'student')
   assert.equal(
-    database
-      .prepare('SELECT status FROM appointments WHERE id = ?')
-      .get(secondId).status,
+    (
+      await database
+        .prepare('SELECT status FROM appointments WHERE id = ?')
+        .get(secondId)
+    ).status,
     'pending'
   )
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
-      )
-      .get(secondId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM classrooms WHERE appointment_id = ?'
+        )
+        .get(secondId)
+    ).count,
     0
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE entity_id = ? AND action = 'appointment.accepted'`
-      )
-      .get(secondId).count,
+        )
+        .get(secondId)
+    ).count,
     0
   )
 })
 
 test('a participant completes a classroom atomically while outsiders are rejected', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '结课学生'
   })
-  const outsider = addUser(database, {
+  const outsider = await addUser(database, {
     role: 'student',
     displayName: '无关结课用户'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '结课教师'
   })
-  addTeacherProfile(database, teacher.id)
-  const courseId = addCourse(database, teacher.id)
+  await addTeacherProfile(database, teacher.id)
+  const courseId = await addCourse(database, teacher.id)
   const created = await requestAppointment(app, student, teacher, courseId)
   const appointmentId = readBody(created).data.id
   const accepted = await app.inject({
@@ -547,7 +574,7 @@ test('a participant completes a classroom atomically while outsiders are rejecte
   assert.equal(beforeOpening.statusCode, 409)
 
   const openedAt = new Date().toISOString()
-  database
+  await database
     .prepare(
       `UPDATE classrooms
        SET status = 'open', opened_at = ?, updated_at = ?
@@ -564,7 +591,7 @@ test('a participant completes a classroom atomically while outsiders are rejecte
   assert.equal(readBody(completed).data.status, 'completed')
   assert.equal(readBody(completed).data.classroom.status, 'closed')
 
-  const persisted = database
+  const persisted = await database
     .prepare(
       `SELECT
         a.status AS appointment_status,
@@ -580,21 +607,25 @@ test('a participant completes a classroom atomically while outsiders are rejecte
   assert.equal(persisted.classroom_status, 'closed')
   assert.ok(Date.parse(persisted.opened_at) <= Date.parse(persisted.closed_at))
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE resource_id = ? AND user_id = ? AND type = 'appointment.completed'`
-      )
-      .get(appointmentId, teacher.id).count,
+        )
+        .get(appointmentId, teacher.id)
+    ).count,
     1
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE entity_id = ? AND action = 'appointment.completed'`
-      )
-      .get(appointmentId).count,
+        )
+        .get(appointmentId)
+    ).count,
     1
   )
 
@@ -609,25 +640,25 @@ test('a participant completes a classroom atomically while outsiders are rejecte
 
 test('appointment ownership prevents response, listing and classroom access leaks', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '学习者丁'
   })
-  const outsiderStudent = addUser(database, {
+  const outsiderStudent = await addUser(database, {
     role: 'student',
     displayName: '无关学生'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '教师丁'
   })
-  const outsiderTeacher = addUser(database, {
+  const outsiderTeacher = await addUser(database, {
     role: 'teacher',
     displayName: '无关教师'
   })
-  addTeacherProfile(database, teacher.id)
-  addTeacherProfile(database, outsiderTeacher.id)
-  const courseId = addCourse(database, teacher.id)
+  await addTeacherProfile(database, teacher.id)
+  await addTeacherProfile(database, outsiderTeacher.id)
+  const courseId = await addCourse(database, teacher.id)
   const created = await requestAppointment(app, student, teacher, courseId)
   const appointmentId = readBody(created).data.id
 

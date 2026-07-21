@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 
 import { z } from 'zod'
 
-import { createDatabase, DEFAULT_DATABASE_FILE } from './database.js'
+import { createDatabase } from './database.js'
 import { hashPassword } from '../lib/password.js'
 
 const bootstrapSchema = z
@@ -45,7 +45,7 @@ export async function bootstrapAdministrator(database, input) {
     throw bootstrapError('INVALID_ADMIN_INPUT', message)
   }
 
-  const existingAdministrator = database
+  const existingAdministrator = await database
     .prepare("SELECT id FROM users WHERE role = 'administrator' LIMIT 1")
     .get()
   if (existingAdministrator) {
@@ -55,8 +55,8 @@ export async function bootstrapAdministrator(database, input) {
     )
   }
 
-  const existingEmail = database
-    .prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE LIMIT 1')
+  const existingEmail = await database
+    .prepare('SELECT id FROM users WHERE email = ? LIMIT 1')
     .get(result.data.email)
   if (existingEmail) {
     throw bootstrapError('EMAIL_IN_USE', '该邮箱已被其他账号使用')
@@ -66,9 +66,10 @@ export async function bootstrapAdministrator(database, input) {
   const passwordHash = await hashPassword(result.data.password)
   const timestamp = new Date().toISOString()
 
-  const create = database.transaction(() => {
+  const create = database.transaction(async () => {
+    await database.exec('LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE')
     if (
-      database
+      await database
         .prepare("SELECT id FROM users WHERE role = 'administrator' LIMIT 1")
         .get()
     ) {
@@ -78,11 +79,12 @@ export async function bootstrapAdministrator(database, input) {
       )
     }
 
-    database
+    await database
       .prepare(
         `INSERT INTO users (
-          id, email, password_hash, role, display_name, status, created_at, updated_at
-        ) VALUES (?, ?, ?, 'administrator', ?, 'active', ?, ?)`
+          id, email, password_hash, role, display_name, status,
+          must_reset_password, created_at, updated_at
+        ) VALUES (?, ?, ?, 'administrator', ?, 'active', true, ?, ?)`
       )
       .run(
         id,
@@ -92,7 +94,7 @@ export async function bootstrapAdministrator(database, input) {
         timestamp,
         timestamp
       )
-    database
+    await database
       .prepare(
         `INSERT INTO audit_logs (
           id, actor_id, action, entity_type, entity_id, details_json, created_at
@@ -106,7 +108,7 @@ export async function bootstrapAdministrator(database, input) {
         timestamp
       )
   })
-  create()
+  await create()
 
   return {
     id,
@@ -124,9 +126,7 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  const database = createDatabase({
-    filename: process.env.DATABASE_PATH || DEFAULT_DATABASE_FILE
-  })
+  const database = await createDatabase()
   try {
     const administrator = await bootstrapAdministrator(database, {
       email: process.env.ADMIN_EMAIL,
@@ -140,7 +140,7 @@ if (isMainModule()) {
     process.stderr.write(`Administrator bootstrap failed: ${error.message}\n`)
     process.exitCode = 1
   } finally {
-    database.close()
+    await database.close()
   }
 }
 

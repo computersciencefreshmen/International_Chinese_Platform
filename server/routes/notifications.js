@@ -69,18 +69,22 @@ export async function notificationRoutes(app) {
 
       const where = `WHERE ${conditions.join(' AND ')}`
       const total = Number(
-        db
-          .prepare(`SELECT COUNT(*) AS count FROM notifications ${where}`)
-          .get(...parameters).count
+        (
+          await db
+            .prepare(`SELECT COUNT(*) AS count FROM notifications ${where}`)
+            .get(...parameters)
+        ).count
       )
       const unread = Number(
-        db
-          .prepare(
-            'SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL'
-          )
-          .get(request.auth.user.id).count
+        (
+          await db
+            .prepare(
+              'SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL'
+            )
+            .get(request.auth.user.id)
+        ).count
       )
-      const rows = db
+      const rows = await db
         .prepare(
           `SELECT * FROM notifications
            ${where}
@@ -109,7 +113,7 @@ export async function notificationRoutes(app) {
       const result = idSchema.safeParse(request.params)
       if (!result.success) return validationError(reply, result)
 
-      const notification = db
+      const notification = await db
         .prepare(
           'SELECT * FROM notifications WHERE id = ? AND user_id = ? LIMIT 1'
         )
@@ -118,11 +122,13 @@ export async function notificationRoutes(app) {
 
       if (!notification.read_at) {
         const readAt = new Date().toISOString()
-        db.prepare(
-          `UPDATE notifications
+        await db
+          .prepare(
+            `UPDATE notifications
            SET read_at = ?
            WHERE id = ? AND user_id = ? AND read_at IS NULL`
-        ).run(readAt, notification.id, request.auth.user.id)
+          )
+          .run(readAt, notification.id, request.auth.user.id)
         notification.read_at = readAt
       }
 
@@ -135,7 +141,7 @@ export async function notificationRoutes(app) {
     { preHandler: app.authenticate },
     async (request, reply) => {
       const readAt = new Date().toISOString()
-      const updated = db
+      const updated = await db
         .prepare(
           `UPDATE notifications
            SET read_at = ?

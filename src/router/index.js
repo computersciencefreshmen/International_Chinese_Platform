@@ -7,6 +7,12 @@ const roleHome = {
   administrator: '/administrator/courseDocking'
 }
 
+const passwordResetRoute = {
+  student: { path: '/student/center/changePassword' },
+  teacher: { path: '/teacher/user', query: { tab: 'security' } },
+  administrator: { path: '/administrator/center/changePasswordAdmin' }
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -237,6 +243,18 @@ router.beforeEach(async (to) => {
   await userStore.restoreSession()
 
   const currentRole = userStore.role
+
+  if (
+    userStore.isAuthenticated &&
+    currentRole &&
+    userStore.profile?.mustResetPassword
+  ) {
+    const resetRoute = passwordResetRoute[currentRole]
+    const onResetRoute =
+      to.path === resetRoute.path &&
+      (currentRole !== 'teacher' || to.query.tab === 'security')
+    if (!onResetRoute) return resetRoute
+  }
 
   if (userStore.isAuthenticated && currentRole === 'student') {
     studentStore.setUserInfo(userStore.profile)

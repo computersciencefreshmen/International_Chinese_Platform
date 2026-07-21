@@ -121,7 +121,7 @@ export function verifyPasswordHash(password, encodedHash) {
   }
 }
 
-function insertUsers(database) {
+async function insertUsers(database) {
   const insert = database.prepare(`
     INSERT OR IGNORE INTO users (
       id, email, password_hash, role, display_name, country, region, age,
@@ -157,7 +157,7 @@ function insertUsers(database) {
   }
 
   for (const account of DEMO_ACCOUNTS) {
-    insert.run({
+    await insert.run({
       ...account,
       ...profiles[account.role],
       passwordHash: hashPassword(DEMO_PASSWORD),
@@ -166,22 +166,20 @@ function insertUsers(database) {
     })
   }
 
-  return Object.fromEntries(
-    DEMO_ACCOUNTS.map((account) => {
-      const row = database
-        .prepare('SELECT id FROM users WHERE email = ?')
-        .get(account.email)
-
-      if (!row) {
-        throw new Error(`Unable to resolve seeded account: ${account.email}`)
-      }
-
-      return [account.role, row.id]
-    })
-  )
+  const userIds = {}
+  for (const account of DEMO_ACCOUNTS) {
+    const row = await database
+      .prepare('SELECT id FROM users WHERE email = ?')
+      .get(account.email)
+    if (!row) {
+      throw new Error(`Unable to resolve seeded account: ${account.email}`)
+    }
+    userIds[account.role] = row.id
+  }
+  return userIds
 }
 
-function insertCourses(database, userIds) {
+async function insertCourses(database, userIds) {
   const insert = database.prepare(`
     INSERT OR IGNORE INTO courses (
       id, teacher_id, title, summary, description, level, category, cover_url,
@@ -194,7 +192,7 @@ function insertCourses(database, userIds) {
     )
   `)
 
-  insert.run({
+  await insert.run({
     id: DEMO_IDS.publishedCourse,
     teacherId: userIds.teacher,
     title: '生活汉语入门',
@@ -212,7 +210,7 @@ function insertCourses(database, userIds) {
     updatedAt: '2026-04-08T09:30:00.000Z'
   })
 
-  insert.run({
+  await insert.run({
     id: DEMO_IDS.pendingCourse,
     teacherId: userIds.teacher,
     title: '中国文化与口语表达',
@@ -229,7 +227,7 @@ function insertCourses(database, userIds) {
     updatedAt: '2026-07-15T05:00:00.000Z'
   })
 
-  database
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO course_reviews (
@@ -246,8 +244,8 @@ function insertCourses(database, userIds) {
     )
 }
 
-function insertTeacherProfile(database, userIds) {
-  database
+async function insertTeacherProfile(database, userIds) {
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO teacher_profiles (
@@ -274,7 +272,7 @@ function insertTeacherProfile(database, userIds) {
     )
 }
 
-function insertAppointments(database, userIds) {
+async function insertAppointments(database, userIds) {
   const insert = database.prepare(`
     INSERT OR IGNORE INTO appointments (
       id, student_id, teacher_id, course_id, scheduled_start, scheduled_end,
@@ -285,7 +283,7 @@ function insertAppointments(database, userIds) {
     )
   `)
 
-  insert.run({
+  await insert.run({
     id: DEMO_IDS.acceptedAppointment,
     studentId: userIds.student,
     teacherId: userIds.teacher,
@@ -300,7 +298,7 @@ function insertAppointments(database, userIds) {
     updatedAt: '2026-07-16T09:00:00.000Z'
   })
 
-  insert.run({
+  await insert.run({
     id: DEMO_IDS.pendingAppointment,
     studentId: userIds.student,
     teacherId: userIds.teacher,
@@ -315,7 +313,7 @@ function insertAppointments(database, userIds) {
     updatedAt: '2026-07-18T08:00:00.000Z'
   })
 
-  database
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO classrooms (
@@ -332,8 +330,8 @@ function insertAppointments(database, userIds) {
     )
 }
 
-function insertAssignments(database, userIds) {
-  database
+async function insertAssignments(database, userIds) {
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO assignments (
@@ -363,7 +361,7 @@ function insertAssignments(database, userIds) {
     )
   `)
 
-  insertQuestion.run({
+  await insertQuestion.run({
     id: DEMO_IDS.questionChoice,
     assignmentId: DEMO_IDS.assignment,
     position: 1,
@@ -380,7 +378,7 @@ function insertAssignments(database, userIds) {
     explanation: '“请给我……”可以礼貌地提出点单需求。'
   })
 
-  insertQuestion.run({
+  await insertQuestion.run({
     id: DEMO_IDS.questionText,
     assignmentId: DEMO_IDS.assignment,
     position: 2,
@@ -392,7 +390,7 @@ function insertAssignments(database, userIds) {
     explanation: '注意使用时间、菜名和感受等信息。'
   })
 
-  database
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO submissions (
@@ -420,8 +418,8 @@ function insertAssignments(database, userIds) {
     )
 }
 
-function insertSupportingData(database, userIds) {
-  database
+async function insertSupportingData(database, userIds) {
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO chat_messages (
@@ -449,7 +447,7 @@ function insertSupportingData(database, userIds) {
     )
   `)
 
-  insertNotification.run({
+  await insertNotification.run({
     id: DEMO_IDS.studentNotification,
     userId: userIds.student,
     type: 'appointment.accepted',
@@ -462,7 +460,7 @@ function insertSupportingData(database, userIds) {
     createdAt: '2026-07-16T09:00:00.000Z'
   })
 
-  insertNotification.run({
+  await insertNotification.run({
     id: DEMO_IDS.teacherNotification,
     userId: userIds.teacher,
     type: 'appointment.requested',
@@ -475,7 +473,7 @@ function insertSupportingData(database, userIds) {
     createdAt: '2026-07-18T08:00:00.000Z'
   })
 
-  database
+  await database
     .prepare(
       `
       INSERT OR IGNORE INTO audit_logs (
@@ -496,34 +494,36 @@ function insertSupportingData(database, userIds) {
     )
 }
 
-export function seedDatabase(database) {
+export async function seedDatabase(database) {
   if (!database || typeof database.prepare !== 'function') {
-    throw new TypeError('seedDatabase requires an open better-sqlite3 database')
+    throw new TypeError('seedDatabase requires an open PostgreSQL database')
   }
 
-  const seed = database.transaction(() => {
-    const userIds = insertUsers(database)
-    insertTeacherProfile(database, userIds)
-    insertCourses(database, userIds)
-    insertAppointments(database, userIds)
-    insertAssignments(database, userIds)
-    insertSupportingData(database, userIds)
+  const seed = database.transaction(async () => {
+    const userIds = await insertUsers(database)
+    await insertTeacherProfile(database, userIds)
+    await insertCourses(database, userIds)
+    await insertAppointments(database, userIds)
+    await insertAssignments(database, userIds)
+    await insertSupportingData(database, userIds)
   })
 
-  seed()
+  await seed()
 
   return {
-    users: database.prepare('SELECT COUNT(*) AS count FROM users').get().count,
-    courses: database.prepare('SELECT COUNT(*) AS count FROM courses').get()
+    users: (await database.prepare('SELECT COUNT(*) AS count FROM users').get())
       .count,
-    appointments: database
-      .prepare('SELECT COUNT(*) AS count FROM appointments')
-      .get().count,
-    assignments: database
-      .prepare('SELECT COUNT(*) AS count FROM assignments')
-      .get().count,
-    submissions: database
-      .prepare('SELECT COUNT(*) AS count FROM submissions')
-      .get().count
+    courses: (
+      await database.prepare('SELECT COUNT(*) AS count FROM courses').get()
+    ).count,
+    appointments: (
+      await database.prepare('SELECT COUNT(*) AS count FROM appointments').get()
+    ).count,
+    assignments: (
+      await database.prepare('SELECT COUNT(*) AS count FROM assignments').get()
+    ).count,
+    submissions: (
+      await database.prepare('SELECT COUNT(*) AS count FROM submissions').get()
+    ).count
   }
 }

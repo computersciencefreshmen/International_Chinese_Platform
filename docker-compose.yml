@@ -1,6 +1,53 @@
 name: international-chinese-platform
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform}
+    ports:
+      - '${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - platform-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U platform -d platform']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-platform}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-platform-development-secret}
+    ports:
+      - '${MINIO_BIND_ADDRESS:-127.0.0.1}:${MINIO_PORT:-9000}:9000'
+      - '${MINIO_BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - platform-objects:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >-
+      /bin/sh -c "until mc alias set local http://minio:9000
+      $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do
+      sleep 1;
+      done;
+      mc mb --ignore-existing local/$${S3_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-platform}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-platform-development-secret}
+      S3_BUCKET: ${S3_BUCKET:-platform-files}
+    restart: 'no'
+
   app:
     image: ${IMAGE_NAME:-international-chinese-platform:local}
     build:
@@ -10,67 +57,70 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
     restart: unless-stopped
     init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-7777}:7777"
+      - '${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-7777}:7777'
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 7777
-      DATABASE_PATH: /app/data/platform.db
-      UPLOAD_DIR: /app/uploads
+      DATABASE_URL: postgresql://platform:${POSTGRES_PASSWORD:-platform}@postgres:5432/platform
+      DATABASE_SSL: 'false'
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      DIST_DIR: /app/dist
+      APP_ORIGINS: '${APP_ORIGINS:-http://localhost:7777,http://localhost:5173}'
+      PUBLIC_WEBSOCKET_ORIGIN: '${PUBLIC_WEBSOCKET_ORIGIN:-http://localhost:7777}'
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      VERIFICATION_CODE_SECRET: '${VERIFICATION_CODE_SECRET:-local-compose-verification-secret-32-characters}'
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      ALLOW_BEARER_AUTH: ${ALLOW_BEARER_AUTH:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      LOGGER: ${LOGGER:-true}
+      SEED_ON_START: ${SEED_ON_START:-false}
       UPLOAD_OWNER_QUOTA_BYTES: ${UPLOAD_OWNER_QUOTA_BYTES:-262144000}
       UPLOAD_TOTAL_QUOTA_BYTES: ${UPLOAD_TOTAL_QUOTA_BYTES:-5368709120}
       UPLOAD_MAX_CONCURRENT: ${UPLOAD_MAX_CONCURRENT:-4}
-      DIST_DIR: /app/dist
-      APP_ORIGIN: "${APP_ORIGIN:?Set APP_ORIGIN to the public HTTPS origin}"
-      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
-      VERIFICATION_CODE_SECRET: "${VERIFICATION_CODE_SECRET:?Set a stable random verification secret}"
-      SECURE_COOKIES: ${SECURE_COOKIES:-true}
-      ALLOW_BEARER_AUTH: ${ALLOW_BEARER_AUTH:-false}
-      TRUST_PROXY: ${TRUST_PROXY:-true}
-      LOGGER: ${LOGGER:-true}
-      SEED_ON_START: "false"
-      BODY_LIMIT_BYTES: ${BODY_LIMIT_BYTES:-1048576}
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: ${S3_BUCKET:-platform-files}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-platform}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-platform-development-secret}
+      S3_FORCE_PATH_STYLE: 'true'
       SMTP_URL: ${SMTP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-}
       AI_API_URL: ${AI_API_URL:-}
       AI_API_KEY: ${AI_API_KEY:-}
       TURN_URL: ${TURN_URL:-}
       TURN_USERNAME: ${TURN_USERNAME:-}
       TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
-    volumes:
-      - platform-database:/app/data
-      - platform-uploads:/app/uploads
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     healthcheck:
       test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://127.0.0.1:7777/api/v1/ready').then((response) => {
-          if (!response.ok) process.exit(1) }).catch(() => process.exit(1))
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:7777/api/v1/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
       interval: 30s
       timeout: 5s
       start_period: 20s
       retries: 3
     stop_grace_period: 20s
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
 
 volumes:
-  platform-database:
-    name: ${DATABASE_VOLUME_NAME:-international-chinese-platform-database}
-  platform-uploads:
-    name: ${UPLOAD_VOLUME_NAME:-international-chinese-platform-uploads}
+  platform-postgres:
+  platform-objects:

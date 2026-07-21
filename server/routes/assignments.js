@@ -263,14 +263,14 @@ const assignmentSelect = `
   INNER JOIN courses AS c ON c.id = a.course_id
 `
 
-function findAssignment(db, assignmentId) {
-  return db
+async function findAssignment(db, assignmentId) {
+  return await db
     .prepare(`${assignmentSelect} WHERE a.id = ? LIMIT 1`)
     .get(assignmentId)
 }
 
-function findQuestions(db, assignmentId) {
-  return db
+async function findQuestions(db, assignmentId) {
+  return await db
     .prepare(
       `SELECT * FROM assignment_questions
        WHERE assignment_id = ?
@@ -373,8 +373,8 @@ function submissionData(row, { includeStudent = false } = {}) {
   return submission
 }
 
-function assignmentDetail(db, row, { includeCorrectAnswer, studentId }) {
-  const questions = findQuestions(db, row.id)
+async function assignmentDetail(db, row, { includeCorrectAnswer, studentId }) {
+  const questions = await findQuestions(db, row.id)
   const detail = {
     ...assignmentSummary(row),
     questionCount: questions.length,
@@ -389,7 +389,7 @@ function assignmentDetail(db, row, { includeCorrectAnswer, studentId }) {
   }
 
   if (studentId) {
-    const submission = db
+    const submission = await db
       .prepare(
         `SELECT * FROM submissions
          WHERE assignment_id = ? AND student_id = ?
@@ -402,7 +402,7 @@ function assignmentDetail(db, row, { includeCorrectAnswer, studentId }) {
   return detail
 }
 
-function insertQuestions(db, assignmentId, questions) {
+async function insertQuestions(db, assignmentId, questions) {
   const insert = db.prepare(
     `INSERT INTO assignment_questions (
       id, assignment_id, position, question_type, prompt, options_json,
@@ -410,8 +410,8 @@ function insertQuestions(db, assignmentId, questions) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
 
-  questions.forEach((question, index) => {
-    insert.run(
+  for (const [index, question] of questions.entries()) {
+    await insert.run(
       randomUUID(),
       assignmentId,
       index + 1,
@@ -422,26 +422,32 @@ function insertQuestions(db, assignmentId, questions) {
       question.points,
       question.explanation
     )
-  })
+  }
 }
 
-function insertAudit(db, request, { action, entityType, entityId, details }) {
-  db.prepare(
-    `INSERT INTO audit_logs (
+async function insertAudit(
+  db,
+  request,
+  { action, entityType, entityId, details }
+) {
+  await db
+    .prepare(
+      `INSERT INTO audit_logs (
       id, actor_id, action, entity_type, entity_id, details_json,
       request_id, ip_address, user_agent
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    randomUUID(),
-    request.auth.user.id,
-    action,
-    entityType,
-    entityId,
-    JSON.stringify(details ?? {}),
-    String(request.id ?? '').slice(0, 128) || null,
-    String(request.ip ?? '').slice(0, 64) || null,
-    String(request.headers['user-agent'] ?? '').slice(0, 512) || null
-  )
+    )
+    .run(
+      randomUUID(),
+      request.auth.user.id,
+      action,
+      entityType,
+      entityId,
+      JSON.stringify(details ?? {}),
+      String(request.id ?? '').slice(0, 128) || null,
+      String(request.ip ?? '').slice(0, 64) || null,
+      String(request.headers['user-agent'] ?? '').slice(0, 512) || null
+    )
 }
 
 function answerErrors(questions, answers, requireComplete) {
@@ -519,7 +525,7 @@ export async function assignmentRoutes(app) {
       const paramsResult = courseIdParamsSchema.safeParse(request.params)
       if (!paramsResult.success) return validationError(reply, paramsResult)
 
-      const course = db
+      const course = await db
         .prepare('SELECT * FROM courses WHERE id = ? LIMIT 1')
         .get(paramsResult.data.courseId)
       if (!course) return responseError(reply, 404, '课程不存在')
@@ -537,7 +543,7 @@ export async function assignmentRoutes(app) {
 
       let rows
       if (role === 'student') {
-        rows = db
+        rows = await db
           .prepare(
             `SELECT
               a.*,
@@ -558,7 +564,7 @@ export async function assignmentRoutes(app) {
           )
           .all(userId, course.id)
       } else {
-        rows = db
+        rows = await db
           .prepare(
             `SELECT a.*, COUNT(q.id) AS question_count
              FROM assignments AS a
@@ -589,8 +595,8 @@ export async function assignmentRoutes(app) {
       const input = bodyResult.data
       const assignmentId = randomUUID()
       const timestamp = new Date().toISOString()
-      const create = db.transaction(() => {
-        const course = db
+      const create = db.transaction(async () => {
+        const course = await db
           .prepare('SELECT * FROM courses WHERE id = ? LIMIT 1')
           .get(paramsResult.data.courseId)
         if (!course) return { error: 'NOT_FOUND' }
@@ -601,24 +607,26 @@ export async function assignmentRoutes(app) {
           return { error: 'COURSE_ARCHIVED' }
         }
 
-        db.prepare(
-          `INSERT INTO assignments (
+        await db
+          .prepare(
+            `INSERT INTO assignments (
             id, course_id, teacher_id, title, instructions, due_at,
             max_score, status, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
-        ).run(
-          assignmentId,
-          course.id,
-          request.auth.user.id,
-          input.title,
-          input.instructions,
-          input.dueAt,
-          input.maxScore,
-          timestamp,
-          timestamp
-        )
-        insertQuestions(db, assignmentId, input.questions)
-        insertAudit(db, request, {
+          )
+          .run(
+            assignmentId,
+            course.id,
+            request.auth.user.id,
+            input.title,
+            input.instructions,
+            input.dueAt,
+            input.maxScore,
+            timestamp,
+            timestamp
+          )
+        await insertQuestions(db, assignmentId, input.questions)
+        await insertAudit(db, request, {
           action: 'assignment.created',
           entityType: 'assignment',
           entityId: assignmentId,
@@ -629,7 +637,7 @@ export async function assignmentRoutes(app) {
 
       let outcome
       try {
-        outcome = create()
+        outcome = await create()
       } catch (error) {
         if (conflictError(error)) {
           return responseError(reply, 409, '该课程中已存在同名作业')
@@ -649,7 +657,7 @@ export async function assignmentRoutes(app) {
 
       return responseData(
         reply,
-        assignmentDetail(db, findAssignment(db, assignmentId), {
+        await assignmentDetail(db, await findAssignment(db, assignmentId), {
           includeCorrectAnswer: true
         }),
         '作业草稿已创建',
@@ -671,8 +679,8 @@ export async function assignmentRoutes(app) {
       if (!bodyResult.success) return validationError(reply, bodyResult)
 
       const input = bodyResult.data
-      const update = db.transaction(() => {
-        const assignment = findAssignment(db, paramsResult.data.id)
+      const update = db.transaction(async () => {
+        const assignment = await findAssignment(db, paramsResult.data.id)
         if (!assignment) return { error: 'NOT_FOUND' }
         if (assignment.teacher_id !== request.auth.user.id) {
           return { error: 'FORBIDDEN' }
@@ -685,12 +693,14 @@ export async function assignmentRoutes(app) {
         const questionTotal = input.questions
           ? input.questions.reduce((sum, question) => sum + question.points, 0)
           : Number(
-              db
-                .prepare(
-                  `SELECT COALESCE(SUM(points), 0) AS total
+              (
+                await db
+                  .prepare(
+                    `SELECT COALESCE(SUM(points), 0) AS total
                    FROM assignment_questions WHERE assignment_id = ?`
-                )
-                .get(assignment.id).total
+                  )
+                  .get(assignment.id)
+              ).total
             )
         if (!scoresEqual(questionTotal, nextMaxScore)) {
           return {
@@ -717,18 +727,20 @@ export async function assignmentRoutes(app) {
         const timestamp = new Date().toISOString()
         assignments.push('updated_at = ?')
         values.push(timestamp, assignment.id)
-        db.prepare(
-          `UPDATE assignments SET ${assignments.join(', ')} WHERE id = ?`
-        ).run(...values)
+        await db
+          .prepare(
+            `UPDATE assignments SET ${assignments.join(', ')} WHERE id = ?`
+          )
+          .run(...values)
 
         if (input.questions) {
-          db.prepare(
-            'DELETE FROM assignment_questions WHERE assignment_id = ?'
-          ).run(assignment.id)
-          insertQuestions(db, assignment.id, input.questions)
+          await db
+            .prepare('DELETE FROM assignment_questions WHERE assignment_id = ?')
+            .run(assignment.id)
+          await insertQuestions(db, assignment.id, input.questions)
         }
 
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: 'assignment.updated',
           entityType: 'assignment',
           entityId: assignment.id,
@@ -739,7 +751,7 @@ export async function assignmentRoutes(app) {
 
       let outcome
       try {
-        outcome = update()
+        outcome = await update()
       } catch (error) {
         if (conflictError(error)) {
           return responseError(reply, 409, '该课程中已存在同名作业')
@@ -768,9 +780,13 @@ export async function assignmentRoutes(app) {
 
       return responseData(
         reply,
-        assignmentDetail(db, findAssignment(db, outcome.assignmentId), {
-          includeCorrectAnswer: true
-        }),
+        await assignmentDetail(
+          db,
+          await findAssignment(db, outcome.assignmentId),
+          {
+            includeCorrectAnswer: true
+          }
+        ),
         '作业草稿已更新'
       )
     }
@@ -783,8 +799,8 @@ export async function assignmentRoutes(app) {
       const paramsResult = assignmentIdParamsSchema.safeParse(request.params)
       if (!paramsResult.success) return validationError(reply, paramsResult)
 
-      const publish = db.transaction(() => {
-        const assignment = findAssignment(db, paramsResult.data.id)
+      const publish = db.transaction(async () => {
+        const assignment = await findAssignment(db, paramsResult.data.id)
         if (!assignment) return { error: 'NOT_FOUND' }
         if (assignment.teacher_id !== request.auth.user.id) {
           return { error: 'FORBIDDEN' }
@@ -796,7 +812,7 @@ export async function assignmentRoutes(app) {
           return { error: 'DEADLINE_PASSED', dueAt: assignment.due_at }
         }
 
-        const questions = db
+        const questions = await db
           .prepare(
             `SELECT COUNT(*) AS count, COALESCE(SUM(points), 0) AS total
              FROM assignment_questions WHERE assignment_id = ?`
@@ -815,7 +831,7 @@ export async function assignmentRoutes(app) {
         }
 
         const timestamp = new Date().toISOString()
-        const updated = db
+        const updated = await db
           .prepare(
             `UPDATE assignments
              SET status = 'published', updated_at = ?
@@ -824,7 +840,7 @@ export async function assignmentRoutes(app) {
           .run(timestamp, assignment.id, request.auth.user.id)
         if (updated.changes !== 1) return { error: 'STATE_CHANGED' }
 
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: 'assignment.published',
           entityType: 'assignment',
           entityId: assignment.id,
@@ -833,7 +849,7 @@ export async function assignmentRoutes(app) {
         return { assignmentId: assignment.id }
       })
 
-      const outcome = publish()
+      const outcome = await publish()
       if (outcome.error === 'NOT_FOUND') {
         return responseError(reply, 404, '作业不存在')
       }
@@ -864,9 +880,13 @@ export async function assignmentRoutes(app) {
 
       return responseData(
         reply,
-        assignmentDetail(db, findAssignment(db, outcome.assignmentId), {
-          includeCorrectAnswer: true
-        }),
+        await assignmentDetail(
+          db,
+          await findAssignment(db, outcome.assignmentId),
+          {
+            includeCorrectAnswer: true
+          }
+        ),
         '作业已发布'
       )
     }
@@ -879,8 +899,8 @@ export async function assignmentRoutes(app) {
       const paramsResult = assignmentIdParamsSchema.safeParse(request.params)
       if (!paramsResult.success) return validationError(reply, paramsResult)
 
-      const close = db.transaction(() => {
-        const assignment = findAssignment(db, paramsResult.data.id)
+      const close = db.transaction(async () => {
+        const assignment = await findAssignment(db, paramsResult.data.id)
         if (!assignment) return { error: 'NOT_FOUND' }
         if (assignment.teacher_id !== request.auth.user.id) {
           return { error: 'FORBIDDEN' }
@@ -890,7 +910,7 @@ export async function assignmentRoutes(app) {
         }
 
         const timestamp = new Date().toISOString()
-        const updated = db
+        const updated = await db
           .prepare(
             `UPDATE assignments
              SET status = 'closed', updated_at = ?
@@ -899,7 +919,7 @@ export async function assignmentRoutes(app) {
           .run(timestamp, assignment.id, request.auth.user.id)
         if (updated.changes !== 1) return { error: 'STATE_CHANGED' }
 
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: 'assignment.closed',
           entityType: 'assignment',
           entityId: assignment.id,
@@ -908,7 +928,7 @@ export async function assignmentRoutes(app) {
         return { assignmentId: assignment.id }
       })
 
-      const outcome = close()
+      const outcome = await close()
       if (outcome.error === 'NOT_FOUND') {
         return responseError(reply, 404, '作业不存在')
       }
@@ -927,9 +947,13 @@ export async function assignmentRoutes(app) {
 
       return responseData(
         reply,
-        assignmentDetail(db, findAssignment(db, outcome.assignmentId), {
-          includeCorrectAnswer: true
-        }),
+        await assignmentDetail(
+          db,
+          await findAssignment(db, outcome.assignmentId),
+          {
+            includeCorrectAnswer: true
+          }
+        ),
         '作业已关闭'
       )
     }
@@ -942,7 +966,7 @@ export async function assignmentRoutes(app) {
       const paramsResult = assignmentIdParamsSchema.safeParse(request.params)
       if (!paramsResult.success) return validationError(reply, paramsResult)
 
-      const assignment = findAssignment(db, paramsResult.data.id)
+      const assignment = await findAssignment(db, paramsResult.data.id)
       if (!assignment) return responseError(reply, 404, '作业不存在')
 
       const { role, id: userId } = request.auth.user
@@ -955,7 +979,7 @@ export async function assignmentRoutes(app) {
         }
         return responseData(
           reply,
-          assignmentDetail(db, assignment, {
+          await assignmentDetail(db, assignment, {
             includeCorrectAnswer: false,
             studentId: userId
           })
@@ -971,7 +995,7 @@ export async function assignmentRoutes(app) {
 
       return responseData(
         reply,
-        assignmentDetail(db, assignment, { includeCorrectAnswer: true })
+        await assignmentDetail(db, assignment, { includeCorrectAnswer: true })
       )
     }
   )
@@ -989,8 +1013,8 @@ export async function assignmentRoutes(app) {
       if (!bodyResult.success) return validationError(reply, bodyResult)
 
       const input = bodyResult.data
-      const save = db.transaction(() => {
-        const assignment = findAssignment(db, paramsResult.data.id)
+      const save = db.transaction(async () => {
+        const assignment = await findAssignment(db, paramsResult.data.id)
         if (!assignment) return { error: 'NOT_FOUND' }
         if (assignment.status === 'closed') {
           return { error: 'ASSIGNMENT_CLOSED' }
@@ -1009,7 +1033,7 @@ export async function assignmentRoutes(app) {
           }
         }
 
-        const existing = db
+        const existing = await db
           .prepare(
             `SELECT * FROM submissions
              WHERE assignment_id = ? AND student_id = ? LIMIT 1`
@@ -1031,7 +1055,7 @@ export async function assignmentRoutes(app) {
           }
         }
 
-        const questions = findQuestions(db, assignment.id)
+        const questions = await findQuestions(db, assignment.id)
         const issues = answerErrors(
           questions,
           input.answers,
@@ -1045,7 +1069,7 @@ export async function assignmentRoutes(app) {
         const submittedAt = nextStatus === 'submitted' ? timestamp : null
 
         if (existing) {
-          const updated = db
+          const updated = await db
             .prepare(
               `UPDATE submissions
                SET answers_json = ?, status = ?, submitted_at = ?, updated_at = ?
@@ -1061,40 +1085,44 @@ export async function assignmentRoutes(app) {
             )
           if (updated.changes !== 1) return { error: 'STATE_CHANGED' }
         } else {
-          db.prepare(
-            `INSERT INTO submissions (
+          await db
+            .prepare(
+              `INSERT INTO submissions (
               id, assignment_id, student_id, answers_json, status,
               submitted_at, feedback, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`
-          ).run(
-            submissionId,
-            assignment.id,
-            request.auth.user.id,
-            JSON.stringify(input.answers),
-            nextStatus,
-            submittedAt,
-            timestamp,
-            timestamp
-          )
+            )
+            .run(
+              submissionId,
+              assignment.id,
+              request.auth.user.id,
+              JSON.stringify(input.answers),
+              nextStatus,
+              submittedAt,
+              timestamp,
+              timestamp
+            )
         }
 
         if (nextStatus === 'submitted') {
-          db.prepare(
-            `INSERT INTO notifications (
+          await db
+            .prepare(
+              `INSERT INTO notifications (
               id, user_id, type, title, body, resource_type, resource_id,
               link, dedupe_key, created_at
             ) VALUES (?, ?, 'assignment.submitted', ?, ?, 'submission', ?, ?, ?, ?)`
-          ).run(
-            randomUUID(),
-            assignment.teacher_id,
-            '有新的作业提交',
-            `学生提交了作业「${assignment.title}」。`,
-            submissionId,
-            `/teacher/courseDetails?assignmentId=${assignment.id}`,
-            `submission:${submissionId}:submitted:${assignment.teacher_id}`,
-            timestamp
-          )
-          insertAudit(db, request, {
+            )
+            .run(
+              randomUUID(),
+              assignment.teacher_id,
+              '有新的作业提交',
+              `学生提交了作业「${assignment.title}」。`,
+              submissionId,
+              `/teacher/courseDetails?assignmentId=${assignment.id}`,
+              `submission:${submissionId}:submitted:${assignment.teacher_id}`,
+              timestamp
+            )
+          await insertAudit(db, request, {
             action: 'submission.submitted',
             entityType: 'submission',
             entityId: submissionId,
@@ -1105,7 +1133,7 @@ export async function assignmentRoutes(app) {
         return { submissionId, created: !existing }
       })
 
-      const outcome = save()
+      const outcome = await save()
       if (outcome.error === 'NOT_FOUND') {
         return responseError(reply, 404, '作业不存在')
       }
@@ -1147,7 +1175,7 @@ export async function assignmentRoutes(app) {
         return responseError(reply, 409, '提交状态已变化，请刷新后重试')
       }
 
-      const submission = db
+      const submission = await db
         .prepare('SELECT * FROM submissions WHERE id = ? LIMIT 1')
         .get(outcome.submissionId)
       return responseData(
@@ -1176,10 +1204,12 @@ export async function assignmentRoutes(app) {
         parameters.push(status)
       }
       const where = `WHERE ${conditions.join(' AND ')}`
-      const total = db
-        .prepare(`SELECT COUNT(*) AS count FROM submissions AS s ${where}`)
-        .get(...parameters).count
-      const rows = db
+      const total = (
+        await db
+          .prepare(`SELECT COUNT(*) AS count FROM submissions AS s ${where}`)
+          .get(...parameters)
+      ).count
+      const rows = await db
         .prepare(
           `SELECT
             s.*,
@@ -1215,7 +1245,7 @@ export async function assignmentRoutes(app) {
       )
       if (!queryResult.success) return validationError(reply, queryResult)
 
-      const assignment = findAssignment(db, paramsResult.data.id)
+      const assignment = await findAssignment(db, paramsResult.data.id)
       if (!assignment) return responseError(reply, 404, '作业不存在')
       if (assignment.teacher_id !== request.auth.user.id) {
         return responseError(reply, 403, '只能查看自己作业的提交记录')
@@ -1232,10 +1262,12 @@ export async function assignmentRoutes(app) {
         parameters.push(status)
       }
       const where = `WHERE ${conditions.join(' AND ')}`
-      const total = db
-        .prepare(`SELECT COUNT(*) AS count FROM submissions AS s ${where}`)
-        .get(...parameters).count
-      const rows = db
+      const total = (
+        await db
+          .prepare(`SELECT COUNT(*) AS count FROM submissions AS s ${where}`)
+          .get(...parameters)
+      ).count
+      const rows = await db
         .prepare(
           `SELECT
             s.*,
@@ -1274,8 +1306,8 @@ export async function assignmentRoutes(app) {
       if (!bodyResult.success) return validationError(reply, bodyResult)
 
       const input = bodyResult.data
-      const grade = db.transaction(() => {
-        const submission = db
+      const grade = db.transaction(async () => {
+        const submission = await db
           .prepare(
             `SELECT
               s.*,
@@ -1303,7 +1335,7 @@ export async function assignmentRoutes(app) {
         }
 
         const timestamp = new Date().toISOString()
-        const updated = db
+        const updated = await db
           .prepare(
             `UPDATE submissions
              SET status = 'graded', score = ?, feedback = ?, graded_by = ?,
@@ -1320,22 +1352,24 @@ export async function assignmentRoutes(app) {
           )
         if (updated.changes !== 1) return { error: 'STATE_CHANGED' }
 
-        db.prepare(
-          `INSERT INTO notifications (
+        await db
+          .prepare(
+            `INSERT INTO notifications (
             id, user_id, type, title, body, resource_type, resource_id,
             link, dedupe_key, created_at
           ) VALUES (?, ?, 'submission.graded', ?, ?, 'submission', ?, ?, ?, ?)`
-        ).run(
-          randomUUID(),
-          submission.student_id,
-          '作业已批阅',
-          `作业「${submission.assignment_title}」已批阅，得分 ${input.score}/${Number(submission.max_score)}。`,
-          submission.id,
-          `/student/homeWork?submissionId=${submission.id}`,
-          `submission:${submission.id}:graded:${submission.student_id}`,
-          timestamp
-        )
-        insertAudit(db, request, {
+          )
+          .run(
+            randomUUID(),
+            submission.student_id,
+            '作业已批阅',
+            `作业「${submission.assignment_title}」已批阅，得分 ${input.score}/${Number(submission.max_score)}。`,
+            submission.id,
+            `/student/homeWork?submissionId=${submission.id}`,
+            `submission:${submission.id}:graded:${submission.student_id}`,
+            timestamp
+          )
+        await insertAudit(db, request, {
           action: 'submission.graded',
           entityType: 'submission',
           entityId: submission.id,
@@ -1349,7 +1383,7 @@ export async function assignmentRoutes(app) {
         return { submissionId: submission.id }
       })
 
-      const outcome = grade()
+      const outcome = await grade()
       if (outcome.error === 'NOT_FOUND') {
         return responseError(reply, 404, '提交记录不存在')
       }
@@ -1371,7 +1405,7 @@ export async function assignmentRoutes(app) {
         return responseError(reply, 409, '提交状态已变化，请刷新后重试')
       }
 
-      const submission = db
+      const submission = await db
         .prepare(
           `SELECT
             s.*,

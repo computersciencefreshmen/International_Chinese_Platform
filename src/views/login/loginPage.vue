@@ -89,7 +89,16 @@ const handleLogin = async () => {
         ? requestedPath
         : null
 
-    await router.replace(safeRequestedPath || roleRoutes[selectedRole.value])
+    const resetRoute = {
+      student: '/student/center/changePassword',
+      teacher: '/teacher/user?tab=security',
+      administrator: '/administrator/center/changePasswordAdmin'
+    }
+    await router.replace(
+      profile.mustResetPassword
+        ? resetRoute[profile.role]
+        : safeRequestedPath || roleRoutes[selectedRole.value]
+    )
   } catch (error) {
     if (!error.messageShown) {
       ElMessage.error(error.response?.data?.msg || error.message || '登录失败')

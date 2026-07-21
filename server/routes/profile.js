@@ -127,10 +127,10 @@ function teacherProfileData(row) {
   }
 }
 
-function profileData(db, user) {
+async function profileData(db, user) {
   const profile = publicUser(user)
   if (profile.role !== 'teacher') return profile
-  const teacherProfile = db
+  const teacherProfile = await db
     .prepare('SELECT * FROM teacher_profiles WHERE user_id = ? LIMIT 1')
     .get(profile.id)
   return { ...profile, teacherProfile: teacherProfileData(teacherProfile) }
@@ -186,10 +186,10 @@ export async function profileRoutes(app) {
     '/api/v1/me',
     { preHandler: app.authenticate },
     async (request, reply) => {
-      const user = db
+      const user = await db
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(request.auth.user.id)
-      return responseData(reply, profileData(db, user))
+      return responseData(reply, await profileData(db, user))
     }
   )
 
@@ -228,10 +228,10 @@ export async function profileRoutes(app) {
       values.push(updatedAt, request.auth.user.id)
       let verificationReset = false
 
-      const updateProfile = db.transaction(() => {
+      const updateProfile = db.transaction(async () => {
         const verifiedProfile =
           request.auth.user.role === 'teacher'
-            ? db
+            ? await db
                 .prepare(
                   `SELECT verified_at
                    FROM teacher_profiles
@@ -241,16 +241,18 @@ export async function profileRoutes(app) {
                 .get(request.auth.user.id)
             : null
 
-        db.prepare(
-          `UPDATE users SET ${assignments.join(', ')} WHERE id = ?`
-        ).run(...values)
+        await db
+          .prepare(`UPDATE users SET ${assignments.join(', ')} WHERE id = ?`)
+          .run(...values)
 
         if (result.data.teacherProfile) {
-          db.prepare(
-            `INSERT INTO teacher_profiles (user_id, created_at, updated_at)
+          await db
+            .prepare(
+              `INSERT INTO teacher_profiles (user_id, created_at, updated_at)
              VALUES (?, ?, ?)
              ON CONFLICT(user_id) DO NOTHING`
-          ).run(request.auth.user.id, updatedAt, updatedAt)
+            )
+            .run(request.auth.user.id, updatedAt, updatedAt)
 
           const teacherAssignments = []
           const teacherValues = []
@@ -268,14 +270,16 @@ export async function profileRoutes(app) {
           }
           teacherAssignments.push('updated_at = ?')
           teacherValues.push(updatedAt, request.auth.user.id)
-          db.prepare(
-            `UPDATE teacher_profiles
+          await db
+            .prepare(
+              `UPDATE teacher_profiles
              SET ${teacherAssignments.join(', ')} WHERE user_id = ?`
-          ).run(...teacherValues)
+            )
+            .run(...teacherValues)
         }
 
         if (verifiedProfile) {
-          const reset = db
+          const reset = await db
             .prepare(
               `UPDATE teacher_profiles
                SET verified_at = NULL, updated_at = ?
@@ -285,33 +289,35 @@ export async function profileRoutes(app) {
           verificationReset = reset.changes === 1
 
           if (verificationReset) {
-            db.prepare(
-              `INSERT INTO audit_logs (
+            await db
+              .prepare(
+                `INSERT INTO audit_logs (
                 id, actor_id, action, entity_type, entity_id, details_json,
                 request_id, ip_address, user_agent, created_at
               ) VALUES (?, ?, 'teacher.verification.reset', 'teacher', ?, ?, ?, ?, ?, ?)`
-            ).run(
-              randomUUID(),
-              request.auth.user.id,
-              request.auth.user.id,
-              JSON.stringify({ reason: 'profile_updated' }),
-              request.id ?? null,
-              request.ip ?? null,
-              request.headers['user-agent'] ?? null,
-              updatedAt
-            )
+              )
+              .run(
+                randomUUID(),
+                request.auth.user.id,
+                request.auth.user.id,
+                JSON.stringify({ reason: 'profile_updated' }),
+                request.id ?? null,
+                request.ip ?? null,
+                request.headers['user-agent'] ?? null,
+                updatedAt
+              )
           }
         }
       })
-      updateProfile()
+      await updateProfile()
 
-      const user = db
+      const user = await db
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(request.auth.user.id)
 
       return responseData(
         reply,
-        profileData(db, user),
+        await profileData(db, user),
         verificationReset
           ? '个人资料已更新，教师认证需要重新审核'
           : '个人资料已更新'
@@ -341,7 +347,7 @@ export async function profileRoutes(app) {
         return validationError(reply, result)
       }
 
-      const user = db
+      const user = await db
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(request.auth.user.id)
 
@@ -360,11 +366,11 @@ export async function profileRoutes(app) {
       const updatedAt = new Date().toISOString()
       let replacementSession
 
-      const rotatePasswordAndSessions = db.transaction(() => {
-        const updateResult = db
+      const rotatePasswordAndSessions = db.transaction(async () => {
+        const updateResult = await db
           .prepare(
             `UPDATE users
-            SET password_hash = ?, updated_at = ?
+            SET password_hash = ?, must_reset_password = false, updated_at = ?
             WHERE id = ? AND password_hash = ?`
           )
           .run(passwordHash, updatedAt, user.id, user.password_hash)
@@ -373,15 +379,15 @@ export async function profileRoutes(app) {
           throw new Error('PASSWORD_CHANGED_CONCURRENTLY')
         }
 
-        revokeUserSessions(db, user.id)
-        return createSession(db, user.id, {
+        await revokeUserSessions(db, user.id)
+        return await createSession(db, user.id, {
           ttlSeconds: app.sessionTtlSeconds,
           ...sessionMetadata(request)
         })
       })
 
       try {
-        replacementSession = rotatePasswordAndSessions()
+        replacementSession = await rotatePasswordAndSessions()
       } catch (error) {
         if (error?.message === 'PASSWORD_CHANGED_CONCURRENTLY') {
           return responseError(reply, 409, '密码已发生变化，请重新登录后再试')
@@ -396,11 +402,15 @@ export async function profileRoutes(app) {
         app.sessionCookieOptions(replacementSession.ttlSeconds)
       )
 
-      const updatedUser = db
+      const updatedUser = await db
         .prepare('SELECT * FROM users WHERE id = ? LIMIT 1')
         .get(user.id)
 
-      return responseData(reply, profileData(db, updatedUser), '密码已更新')
+      return responseData(
+        reply,
+        await profileData(db, updatedUser),
+        '密码已更新'
+      )
     }
   )
 }

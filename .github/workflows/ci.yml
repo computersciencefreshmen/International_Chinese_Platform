@@ -15,6 +15,20 @@ jobs:
     name: Validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: platform
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U platform -d platform"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
 
     steps:
       - name: Check out repository
@@ -40,6 +54,7 @@ jobs:
         env:
           NODE_ENV: test
           CI: true
+          TEST_DATABASE_URL: postgresql://platform:platform@127.0.0.1:5432/platform
 
       - name: Upload production bundle
         uses: actions/upload-artifact@v4
@@ -53,6 +68,20 @@ jobs:
     name: Cross-role browser E2E
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: platform
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U platform -d platform"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
 
     steps:
       - name: Check out repository
@@ -83,6 +112,30 @@ jobs:
       - name: Build production application
         run: pnpm build
 
+      - name: Start isolated MinIO object storage
+        run: |
+          docker run --detach --name icp-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=platform \
+            --env MINIO_ROOT_PASSWORD=platform-development-secret \
+            minio/minio:latest server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then break; fi
+            if [ "$attempt" -eq 30 ]; then exit 1; fi
+            sleep 1
+          done
+          docker run --rm --network host --entrypoint /bin/sh minio/mc:latest -c \
+            "mc alias set local http://127.0.0.1:9000 platform platform-development-secret && mc mb --ignore-existing local/platform-files"
+
+      - name: Initialize E2E database
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://platform:platform@127.0.0.1:5432/platform
+          DATABASE_SSL: 'false'
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+
       - name: Install browser test dependencies
         run: |
           python -m pip install --requirement e2e/requirements.txt
@@ -91,14 +144,22 @@ jobs:
       - name: Start isolated production service
         env:
           NODE_ENV: production
-          SEED_ON_START: 'true'
+          SEED_ON_START: 'false'
           SECURE_COOKIES: 'false'
-          APP_ORIGIN: http://localhost:7777
+          ALLOW_BEARER_AUTH: 'false'
+          DATABASE_URL: postgresql://platform:platform@127.0.0.1:5432/platform
+          DATABASE_SSL: 'false'
+          APP_ORIGINS: http://localhost:7777
+          PUBLIC_WEBSOCKET_ORIGIN: ws://localhost:7777
           VERIFICATION_CODE_SECRET: e2e-only-verification-secret-32-characters
-          DATABASE_PATH: .data/e2e.db
+          S3_ENDPOINT: http://127.0.0.1:9000
+          S3_REGION: us-east-1
+          S3_BUCKET: platform-files
+          S3_ACCESS_KEY_ID: platform
+          S3_SECRET_ACCESS_KEY: platform-development-secret
+          S3_FORCE_PATH_STYLE: 'true'
         run: |
-          mkdir -p test-results/e2e .data
-          rm -f .data/e2e.db .data/e2e.db-shm .data/e2e.db-wal
+          mkdir -p test-results/e2e
           pnpm start > test-results/e2e/service.log 2>&1 &
           echo $! > test-results/e2e/service.pid
 
@@ -114,7 +175,6 @@ jobs:
           name: international-chinese-platform-e2e-failure
           path: |
             test-results/e2e
-            .data/e2e.db
           if-no-files-found: warn
           retention-days: 7
 
@@ -124,3 +184,4 @@ jobs:
           if [ -f test-results/e2e/service.pid ]; then
             kill "$(cat test-results/e2e/service.pid)" || true
           fi
+          docker rm --force icp-minio || true

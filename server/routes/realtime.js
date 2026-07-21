@@ -175,8 +175,8 @@ const messageSelect = `
   LEFT JOIN users AS sender ON sender.id = message.sender_id
 `
 
-function findClassroom(db, classroomId) {
-  return db
+async function findClassroom(db, classroomId) {
+  return await db
     .prepare(
       `SELECT
         classroom.id,
@@ -369,24 +369,25 @@ export async function realtimeRoutes(app) {
     return rooms.get(classroomId)?.get(userId)?.size ?? 0
   }
 
-  function claimCanAccessClassroom(claim) {
+  async function claimCanAccessClassroom(claim) {
     const now = new Date().toISOString()
-    const session = db
+    const session = await db
       .prepare(
         `SELECT session.id
          FROM sessions AS session
-         INNER JOIN users AS user ON user.id = session.user_id
+         INNER JOIN users AS account ON account.id = session.user_id
          WHERE session.id = ?
            AND session.user_id = ?
            AND session.revoked_at IS NULL
            AND session.expires_at > ?
-           AND user.status = 'active'
+           AND account.status = 'active'
+           AND account.must_reset_password = false
          LIMIT 1`
       )
       .get(claim.sessionId, claim.user.id, now)
     if (!session) return false
 
-    const classroom = findClassroom(db, claim.classroomId)
+    const classroom = await findClassroom(db, claim.classroomId)
     if (
       !classroom ||
       classroom.appointment_status !== 'accepted' ||
@@ -402,12 +403,12 @@ export async function realtimeRoutes(app) {
     )
   }
 
-  function closeStaleConnections() {
+  async function closeStaleConnections() {
     for (const users of rooms.values()) {
       for (const sockets of users.values()) {
         for (const socket of sockets) {
           const claim = connectionClaims.get(socket)
-          if (!claim || !claimCanAccessClassroom(claim)) {
+          if (!claim || !(await claimCanAccessClassroom(claim))) {
             protocolError(
               socket,
               'CLASSROOM_ACCESS_REVOKED',
@@ -420,15 +421,15 @@ export async function realtimeRoutes(app) {
     }
   }
 
-  function loadMessage(messageId) {
-    const row = db
+  async function loadMessage(messageId) {
+    const row = await db
       .prepare(`${messageSelect} WHERE message.id = ? LIMIT 1`)
       .get(messageId)
     return row ? messageData(row) : null
   }
 
-  function existingClientMessage(senderId, clientMessageId) {
-    const row = db
+  async function existingClientMessage(senderId, clientMessageId) {
+    const row = await db
       .prepare(
         `${messageSelect}
          WHERE message.sender_id = ? AND message.client_message_id = ?
@@ -438,8 +439,11 @@ export async function realtimeRoutes(app) {
     return row ? messageData(row) : null
   }
 
-  function persistChatMessage(claim, event) {
-    const existing = existingClientMessage(claim.user.id, event.clientMessageId)
+  async function persistChatMessage(claim, event) {
+    const existing = await existingClientMessage(
+      claim.user.id,
+      event.clientMessageId
+    )
     if (existing) {
       if (existing.classroomId !== claim.classroomId) {
         return { error: 'CLIENT_MESSAGE_ID_CONFLICT' }
@@ -451,26 +455,28 @@ export async function realtimeRoutes(app) {
     const createdAt = new Date().toISOString()
 
     try {
-      db.prepare(
-        `INSERT INTO chat_messages (
+      await db
+        .prepare(
+          `INSERT INTO chat_messages (
           id, classroom_id, sender_id, message_type, content,
           metadata_json, client_message_id, created_at
         ) VALUES (?, ?, ?, 'text', ?, '{}', ?, ?)`
-      ).run(
-        id,
-        claim.classroomId,
-        claim.user.id,
-        event.content,
-        event.clientMessageId,
-        createdAt
-      )
+        )
+        .run(
+          id,
+          claim.classroomId,
+          claim.user.id,
+          event.content,
+          event.clientMessageId,
+          createdAt
+        )
     } catch (error) {
       const isUniqueConflict =
         error?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
         /UNIQUE constraint failed/i.test(error?.message ?? '')
       if (!isUniqueConflict) throw error
 
-      const duplicate = existingClientMessage(
+      const duplicate = await existingClientMessage(
         claim.user.id,
         event.clientMessageId
       )
@@ -480,7 +486,7 @@ export async function realtimeRoutes(app) {
       return { message: duplicate, duplicate: true }
     }
 
-    return { message: loadMessage(id), duplicate: false }
+    return { message: await loadMessage(id), duplicate: false }
   }
 
   function forwardRtc(socket, claim, event) {
@@ -507,7 +513,7 @@ export async function realtimeRoutes(app) {
     }
   }
 
-  function handleEvent(socket, claim, rawData, isBinary) {
+  async function handleEvent(socket, claim, rawData, isBinary) {
     if (isBinary) {
       socket.close(1003, 'Binary events are not supported')
       return
@@ -540,7 +546,7 @@ export async function realtimeRoutes(app) {
       }
 
       try {
-        const outcome = persistChatMessage(claim, result.data)
+        const outcome = await persistChatMessage(claim, result.data)
         if (outcome.error) {
           protocolError(
             socket,
@@ -669,7 +675,7 @@ export async function realtimeRoutes(app) {
       const params = classroomParamsSchema.safeParse(request.params)
       if (!params.success) return validationError(reply, params)
 
-      const classroom = findClassroom(db, params.data.id)
+      const classroom = await findClassroom(db, params.data.id)
       if (!classroom) return responseError(reply, 404, '课堂不存在')
 
       const participant = participantFor(classroom, request.auth.user.id)
@@ -708,6 +714,13 @@ export async function realtimeRoutes(app) {
         participantIds: [classroom.student_id, classroom.teacher_id],
         expiresAt
       })
+      const websocketPath = `/ws/classroom?ticket=${encodeURIComponent(ticket)}`
+      const websocketOrigin =
+        app.config?.publicWebsocketOrigin ?? 'ws://localhost'
+      const websocketUrl = new URL(
+        websocketPath,
+        `${websocketOrigin.replace(/\/$/, '')}/`
+      ).toString()
 
       return responseData(
         reply,
@@ -722,7 +735,8 @@ export async function realtimeRoutes(app) {
               !accessWindow.allowed &&
               isDevelopmentDemoClassroom(app, classroom)
           },
-          websocketPath: `/ws/classroom?ticket=${encodeURIComponent(ticket)}`
+          websocketUrl,
+          websocketPath
         },
         '连接票据已创建',
         201
@@ -740,7 +754,7 @@ export async function realtimeRoutes(app) {
       const query = historyQuerySchema.safeParse(request.query ?? {})
       if (!query.success) return validationError(reply, query)
 
-      const classroom = findClassroom(db, params.data.id)
+      const classroom = await findClassroom(db, params.data.id)
       if (!classroom) return responseError(reply, 404, '课堂不存在')
       if (!participantFor(classroom, request.auth.user.id)) {
         return responseError(reply, 403, '只有课堂参与者可以查看课堂消息')
@@ -756,7 +770,7 @@ export async function realtimeRoutes(app) {
         parameters.push(new Date(query.data.before).toISOString())
       }
 
-      const rows = db
+      const rows = await db
         .prepare(
           `${messageSelect}
            WHERE ${conditions.join(' AND ')}
@@ -789,7 +803,7 @@ export async function realtimeRoutes(app) {
         const claim = consumeTicket(query.data.ticket)
         if (!claim) return responseError(reply, 401, '课堂连接票据无效或已过期')
 
-        const classroom = findClassroom(db, claim.classroomId)
+        const classroom = await findClassroom(db, claim.classroomId)
         const accessWindow = classroom
           ? classroomJoinWindow(classroom)
           : { allowed: false }
@@ -800,7 +814,7 @@ export async function realtimeRoutes(app) {
           (!accessWindow.allowed &&
             !isDevelopmentDemoClassroom(app, classroom)) ||
           !isActiveParticipant(classroom, claim.user.id) ||
-          !claimCanAccessClassroom(claim)
+          !(await claimCanAccessClassroom(claim))
         ) {
           return responseError(reply, 403, '当前无法加入课堂')
         }
@@ -810,7 +824,7 @@ export async function realtimeRoutes(app) {
         request[ticketClaim] = claim
       }
     },
-    (socket, request) => {
+    async (socket, request) => {
       const claim = request[ticketClaim]
       let cleanedUp = false
       let eventWindowStartedAt = Date.now()
@@ -825,7 +839,7 @@ export async function realtimeRoutes(app) {
         return
       }
 
-      socket.on('message', (data, isBinary) => {
+      socket.on('message', async (data, isBinary) => {
         const now = Date.now()
         if (now - eventWindowStartedAt >= EVENT_RATE_WINDOW_MS) {
           eventWindowStartedAt = now
@@ -837,7 +851,7 @@ export async function realtimeRoutes(app) {
           socket.close(1008, 'Event rate limit exceeded')
           return
         }
-        if (!claimCanAccessClassroom(claim)) {
+        if (!(await claimCanAccessClassroom(claim))) {
           protocolError(
             socket,
             'CLASSROOM_ACCESS_REVOKED',
@@ -846,7 +860,7 @@ export async function realtimeRoutes(app) {
           socket.close(1008, 'Classroom access revoked')
           return
         }
-        handleEvent(socket, claim, data, isBinary)
+        await handleEvent(socket, claim, data, isBinary)
       })
 
       const cleanup = () => {
@@ -868,17 +882,19 @@ export async function realtimeRoutes(app) {
       socket.once('error', cleanup)
 
       const firstForUser = addSocket(claim, socket)
-      db.prepare(
-        `UPDATE classrooms
+      await db
+        .prepare(
+          `UPDATE classrooms
          SET status = 'open',
              opened_at = COALESCE(opened_at, ?),
              updated_at = ?
          WHERE id = ? AND status = 'scheduled'`
-      ).run(
-        new Date().toISOString(),
-        new Date().toISOString(),
-        claim.classroomId
-      )
+        )
+        .run(
+          new Date().toISOString(),
+          new Date().toISOString(),
+          claim.classroomId
+        )
 
       safeSend(socket, {
         type: 'presence.snapshot',

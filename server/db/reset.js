@@ -1,36 +1,21 @@
-import { existsSync, lstatSync, unlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 
-import { createDatabase, DEFAULT_DATABASE_FILE } from './database.js'
+import { createDatabase, DEFAULT_DATABASE_URL } from './database.js'
+import { seedDatabase } from './seed-data.js'
 
-function removeDatabaseFile(filename) {
-  for (const candidate of [filename, `${filename}-shm`, `${filename}-wal`]) {
-    if (!existsSync(candidate)) {
-      continue
-    }
+export async function resetDatabase({
+  connectionString = process.env.DATABASE_URL || DEFAULT_DATABASE_URL,
+  seed = true
+} = {}) {
+  const database = await createDatabase({ connectionString, migrate: false })
+  await database.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public;')
+  await database.close()
 
-    if (!lstatSync(candidate).isFile()) {
-      throw new Error(`Refusing to remove non-file database path: ${candidate}`)
-    }
-
-    unlinkSync(candidate)
-  }
-}
-
-export function resetDatabase({ filename = DEFAULT_DATABASE_FILE } = {}) {
-  if (typeof filename !== 'string' || filename.length === 0) {
-    throw new TypeError('Database filename must be a non-empty string')
-  }
-
-  if (filename === ':memory:') {
-    return createDatabase({ filename, seed: true })
-  }
-
-  const resolvedFilename = resolve(filename)
-  removeDatabaseFile(resolvedFilename)
-  return createDatabase({ filename: resolvedFilename, seed: true })
+  const recreated = await createDatabase({ connectionString })
+  if (seed) await seedDatabase(recreated)
+  return recreated
 }
 
 function isMainModule() {
@@ -41,8 +26,10 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  const filename = process.argv[2] || DEFAULT_DATABASE_FILE
-  const database = resetDatabase({ filename })
-  database.close()
-  process.stdout.write(`Database reset complete: ${filename}\n`)
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('db:reset is disabled in production')
+  }
+  const database = await resetDatabase()
+  await database.close()
+  process.stdout.write('PostgreSQL database reset complete\n')
 }

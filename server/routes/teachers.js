@@ -105,12 +105,13 @@ const teacherSelect = `
     tp.teaching_style_json,
     tp.languages_json,
     tp.verified_at,
-    COUNT(c.id) AS published_course_count
+    (
+      SELECT COUNT(*)
+      FROM courses AS c
+      WHERE c.teacher_id = u.id AND c.status = 'published'
+    ) AS published_course_count
   FROM users AS u
   LEFT JOIN teacher_profiles AS tp ON tp.user_id = u.id
-  LEFT JOIN courses AS c
-    ON c.teacher_id = u.id
-   AND c.status = 'published'
 `
 
 export async function teacherRoutes(app) {
@@ -145,7 +146,9 @@ export async function teacherRoutes(app) {
     }
 
     if (specialty) {
-      conditions.push("COALESCE(tp.specialties_json, '[]') LIKE ?")
+      conditions.push(
+        "COALESCE(tp.specialties_json, '[]'::jsonb)::text ILIKE ?"
+      )
       parameters.push(`%${specialty}%`)
     }
 
@@ -155,20 +158,21 @@ export async function teacherRoutes(app) {
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`
-    const total = db
-      .prepare(
-        `SELECT COUNT(*) AS count
+    const total = (
+      await db
+        .prepare(
+          `SELECT COUNT(*) AS count
          FROM users AS u
          LEFT JOIN teacher_profiles AS tp ON tp.user_id = u.id
          ${where}`
-      )
-      .get(...parameters).count
+        )
+        .get(...parameters)
+    ).count
     const offset = (page - 1) * pageSize
-    const rows = db
+    const rows = await db
       .prepare(
         `${teacherSelect}
          ${where}
-         GROUP BY u.id
          ORDER BY
            COALESCE(tp.rating, 5) DESC,
            COALESCE(tp.experience_years, 0) DESC,
@@ -190,14 +194,13 @@ export async function teacherRoutes(app) {
   })
 
   app.get('/api/v1/teachers/:id', async (request, reply) => {
-    const teacher = db
+    const teacher = await db
       .prepare(
         `${teacherSelect}
          WHERE u.id = ?
            AND u.role = 'teacher'
            AND u.status = 'active'
            AND tp.verified_at IS NOT NULL
-         GROUP BY u.id
          LIMIT 1`
       )
       .get(request.params.id)
@@ -206,7 +209,7 @@ export async function teacherRoutes(app) {
       return responseError(reply, 404, '教师不存在')
     }
 
-    const courses = db
+    const courses = await db
       .prepare(
         `SELECT
           id, title, summary, description, level, category, cover_url,

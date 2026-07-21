@@ -1,3 +1,4 @@
+import axios from 'axios'
 import request from '@/utils/request'
 
 async function dataRequest(config) {
@@ -166,14 +167,36 @@ export const readAllNotifications = () =>
   dataRequest({ method: 'POST', url: '/notifications/read-all' })
 
 export async function uploadFile(file, category, onUploadProgress) {
-  const formData = new FormData()
-  formData.append('file', file)
+  const intent = await dataRequest({
+    method: 'POST',
+    url: '/files/upload-intents',
+    data: {
+      category,
+      originalName: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size
+    }
+  })
+
+  try {
+    await axios.put(intent.uploadUrl, file, {
+      headers: intent.headers,
+      onUploadProgress,
+      timeout: 10 * 60 * 1000,
+      withCredentials: false
+    })
+  } catch (error) {
+    await dataRequest({
+      method: 'DELETE',
+      url: `/files/upload-intents/${intent.id}`
+    }).catch(() => {})
+    throw error
+  }
+
   return dataRequest({
     method: 'POST',
-    url: '/files',
-    params: { category },
-    data: formData,
-    onUploadProgress
+    url: `/files/upload-intents/${intent.id}/complete`,
+    timeout: 2 * 60 * 1000
   })
 }
 

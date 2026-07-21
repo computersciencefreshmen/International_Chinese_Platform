@@ -155,40 +155,57 @@ const appointmentSelect = `
   LEFT JOIN classrooms AS classroom ON classroom.appointment_id = a.id
 `
 
-function findAppointment(db, appointmentId) {
-  return db
+async function findAppointment(db, appointmentId) {
+  return await db
     .prepare(`${appointmentSelect} WHERE a.id = ? LIMIT 1`)
     .get(appointmentId)
 }
 
-function insertNotification(
+async function insertNotification(
   db,
   { userId, type, title, body, appointmentId, link = null, dedupeKey }
 ) {
-  db.prepare(
-    `INSERT INTO notifications (
+  await db
+    .prepare(
+      `INSERT INTO notifications (
       id, user_id, type, title, body, resource_type, resource_id,
       link, dedupe_key
     ) VALUES (?, ?, ?, ?, ?, 'appointment', ?, ?, ?)`
-  ).run(randomUUID(), userId, type, title, body, appointmentId, link, dedupeKey)
+    )
+    .run(
+      randomUUID(),
+      userId,
+      type,
+      title,
+      body,
+      appointmentId,
+      link,
+      dedupeKey
+    )
 }
 
-function insertAudit(db, request, { action, appointmentId, details = {} }) {
-  db.prepare(
-    `INSERT INTO audit_logs (
+async function insertAudit(
+  db,
+  request,
+  { action, appointmentId, details = {} }
+) {
+  await db
+    .prepare(
+      `INSERT INTO audit_logs (
       id, actor_id, action, entity_type, entity_id, details_json,
       request_id, ip_address, user_agent
     ) VALUES (?, ?, ?, 'appointment', ?, ?, ?, ?, ?)`
-  ).run(
-    randomUUID(),
-    request.auth.user.id,
-    action,
-    appointmentId,
-    JSON.stringify(details),
-    String(request.id ?? '').slice(0, 128) || null,
-    String(request.ip ?? '').slice(0, 64) || null,
-    String(request.headers['user-agent'] ?? '').slice(0, 512) || null
-  )
+    )
+    .run(
+      randomUUID(),
+      request.auth.user.id,
+      action,
+      appointmentId,
+      JSON.stringify(details),
+      String(request.id ?? '').slice(0, 128) || null,
+      String(request.ip ?? '').slice(0, 64) || null,
+      String(request.headers['user-agent'] ?? '').slice(0, 512) || null
+    )
 }
 
 function roomCode() {
@@ -259,7 +276,7 @@ export async function appointmentRoutes(app) {
         return responseError(reply, 400, '预约时间不能超过未来一年')
       }
 
-      const teacher = db
+      const teacher = await db
         .prepare(
           `SELECT u.id, tp.verified_at
            FROM users AS u
@@ -279,7 +296,7 @@ export async function appointmentRoutes(app) {
 
       const courseId = result.data.courseId ?? null
       if (courseId) {
-        const course = db
+        const course = await db
           .prepare(
             `SELECT id FROM courses
              WHERE id = ? AND teacher_id = ? AND status = 'published'
@@ -298,27 +315,29 @@ export async function appointmentRoutes(app) {
       ).toISOString()
       const timestamp = new Date().toISOString()
 
-      const createAppointment = db.transaction(() => {
-        db.prepare(
-          `INSERT INTO appointments (
+      const createAppointment = db.transaction(async () => {
+        await db
+          .prepare(
+            `INSERT INTO appointments (
             id, student_id, teacher_id, course_id, scheduled_start,
             scheduled_end, topic, message, status, response_note,
             created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', ?, ?)`
-        ).run(
-          appointmentId,
-          request.auth.user.id,
-          teacher.id,
-          courseId,
-          scheduledStart,
-          scheduledEnd,
-          result.data.topic,
-          result.data.message,
-          timestamp,
-          timestamp
-        )
+          )
+          .run(
+            appointmentId,
+            request.auth.user.id,
+            teacher.id,
+            courseId,
+            scheduledStart,
+            scheduledEnd,
+            result.data.topic,
+            result.data.message,
+            timestamp,
+            timestamp
+          )
 
-        insertNotification(db, {
+        await insertNotification(db, {
           userId: teacher.id,
           type: 'appointment.requested',
           title: '收到新的课堂预约',
@@ -327,7 +346,7 @@ export async function appointmentRoutes(app) {
           link: '/teacher/teachingDocking',
           dedupeKey: `appointment:${appointmentId}:requested:${teacher.id}`
         })
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: 'appointment.requested',
           appointmentId,
           details: {
@@ -340,7 +359,7 @@ export async function appointmentRoutes(app) {
       })
 
       try {
-        createAppointment()
+        await createAppointment()
       } catch (error) {
         if (conflictError(error)) {
           return responseError(reply, 409, '相同时间的预约已经存在')
@@ -350,7 +369,7 @@ export async function appointmentRoutes(app) {
 
       return responseData(
         reply,
-        appointmentData(findAppointment(db, appointmentId)),
+        appointmentData(await findAppointment(db, appointmentId)),
         '预约申请已提交',
         201
       )
@@ -420,11 +439,13 @@ export async function appointmentRoutes(app) {
       }
 
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
-      const total = db
-        .prepare(`SELECT COUNT(*) AS count FROM appointments AS a ${where}`)
-        .get(...parameters).count
+      const total = (
+        await db
+          .prepare(`SELECT COUNT(*) AS count FROM appointments AS a ${where}`)
+          .get(...parameters)
+      ).count
       const offset = (filters.page - 1) * filters.pageSize
-      const appointments = db
+      const appointments = await db
         .prepare(
           `${appointmentSelect}
            ${where}
@@ -454,8 +475,8 @@ export async function appointmentRoutes(app) {
         return validationError(reply, result)
       }
 
-      const respond = db.transaction(() => {
-        const appointment = db
+      const respond = db.transaction(async () => {
+        const appointment = await db
           .prepare('SELECT * FROM appointments WHERE id = ? LIMIT 1')
           .get(request.params.id)
 
@@ -470,7 +491,7 @@ export async function appointmentRoutes(app) {
         }
 
         if (result.data.action === 'accept') {
-          const eligibleTeacher = db
+          const eligibleTeacher = await db
             .prepare(
               `SELECT 1
                FROM users AS u
@@ -485,7 +506,7 @@ export async function appointmentRoutes(app) {
             return { error: 'TEACHER_NOT_VERIFIED' }
           }
 
-          const conflict = db
+          const conflict = await db
             .prepare(
               `SELECT id, teacher_id, student_id FROM appointments
                WHERE (teacher_id = ? OR student_id = ?)
@@ -517,7 +538,7 @@ export async function appointmentRoutes(app) {
 
         const timestamp = new Date().toISOString()
         const status = result.data.action === 'accept' ? 'accepted' : 'rejected'
-        const updated = db
+        const updated = await db
           .prepare(
             `UPDATE appointments
              SET status = ?, response_note = ?, updated_at = ?
@@ -531,13 +552,15 @@ export async function appointmentRoutes(app) {
         let classroomId = null
         if (status === 'accepted') {
           classroomId = randomUUID()
-          db.prepare(
-            `INSERT INTO classrooms (
+          await db
+            .prepare(
+              `INSERT INTO classrooms (
               id, appointment_id, room_code, status, created_at, updated_at
             ) VALUES (?, ?, ?, 'scheduled', ?, ?)`
-          ).run(classroomId, appointment.id, roomCode(), timestamp, timestamp)
+            )
+            .run(classroomId, appointment.id, roomCode(), timestamp, timestamp)
 
-          insertNotification(db, {
+          await insertNotification(db, {
             userId: appointment.student_id,
             type: 'appointment.accepted',
             title: '预约已被教师接受',
@@ -546,7 +569,7 @@ export async function appointmentRoutes(app) {
             link: `/student/liveClass?classroomId=${classroomId}`,
             dedupeKey: `appointment:${appointment.id}:accepted:${appointment.student_id}`
           })
-          insertNotification(db, {
+          await insertNotification(db, {
             userId: appointment.teacher_id,
             type: 'appointment.accepted',
             title: '课堂预约已确认',
@@ -556,7 +579,7 @@ export async function appointmentRoutes(app) {
             dedupeKey: `appointment:${appointment.id}:accepted:${appointment.teacher_id}`
           })
         } else {
-          insertNotification(db, {
+          await insertNotification(db, {
             userId: appointment.student_id,
             type: 'appointment.rejected',
             title: '预约未被接受',
@@ -566,7 +589,7 @@ export async function appointmentRoutes(app) {
           })
         }
 
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: `appointment.${status}`,
           appointmentId: appointment.id,
           details: {
@@ -580,7 +603,7 @@ export async function appointmentRoutes(app) {
         return { appointmentId: appointment.id }
       })
 
-      const outcome = respond()
+      const outcome = await respond()
       if (outcome.error === 'NOT_FOUND') {
         return responseError(reply, 404, '预约不存在')
       }
@@ -606,7 +629,7 @@ export async function appointmentRoutes(app) {
         })
       }
 
-      const appointment = findAppointment(db, outcome.appointmentId)
+      const appointment = await findAppointment(db, outcome.appointmentId)
       return responseData(
         reply,
         appointmentData(appointment),
@@ -624,8 +647,8 @@ export async function appointmentRoutes(app) {
         return validationError(reply, result)
       }
 
-      const cancel = db.transaction(() => {
-        const appointment = db
+      const cancel = db.transaction(async () => {
+        const appointment = await db
           .prepare('SELECT * FROM appointments WHERE id = ? LIMIT 1')
           .get(request.params.id)
         if (!appointment) {
@@ -646,7 +669,7 @@ export async function appointmentRoutes(app) {
         }
 
         const timestamp = new Date().toISOString()
-        const updated = db
+        const updated = await db
           .prepare(
             `UPDATE appointments
              SET status = 'cancelled', updated_at = ?
@@ -657,18 +680,20 @@ export async function appointmentRoutes(app) {
           return { error: 'INVALID_STATE' }
         }
 
-        db.prepare(
-          `UPDATE classrooms
+        await db
+          .prepare(
+            `UPDATE classrooms
            SET status = 'closed',
                opened_at = COALESCE(opened_at, ?),
                closed_at = ?,
                updated_at = ?
            WHERE appointment_id = ? AND status <> 'closed'`
-        ).run(timestamp, timestamp, timestamp, appointment.id)
+          )
+          .run(timestamp, timestamp, timestamp, appointment.id)
 
         const otherParticipantId =
           role === 'student' ? appointment.teacher_id : appointment.student_id
-        insertNotification(db, {
+        await insertNotification(db, {
           userId: otherParticipantId,
           type: 'appointment.cancelled',
           title: '课堂预约已取消',
@@ -676,7 +701,7 @@ export async function appointmentRoutes(app) {
           appointmentId: appointment.id,
           dedupeKey: `appointment:${appointment.id}:cancelled:${otherParticipantId}`
         })
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: 'appointment.cancelled',
           appointmentId: appointment.id,
           details: {
@@ -689,7 +714,7 @@ export async function appointmentRoutes(app) {
         return { appointmentId: appointment.id }
       })
 
-      const outcome = cancel()
+      const outcome = await cancel()
       if (outcome.error === 'NOT_FOUND') {
         return responseError(reply, 404, '预约不存在')
       }
@@ -704,7 +729,7 @@ export async function appointmentRoutes(app) {
 
       return responseData(
         reply,
-        appointmentData(findAppointment(db, outcome.appointmentId)),
+        appointmentData(await findAppointment(db, outcome.appointmentId)),
         '预约已取消'
       )
     }
@@ -714,8 +739,8 @@ export async function appointmentRoutes(app) {
     '/api/v1/classrooms/:id/complete',
     { preHandler: app.authenticate },
     async (request, reply) => {
-      const complete = db.transaction(() => {
-        const classroom = db
+      const complete = db.transaction(async () => {
+        const classroom = await db
           .prepare(
             `SELECT
               classroom.id AS classroom_id,
@@ -748,7 +773,7 @@ export async function appointmentRoutes(app) {
         }
 
         const timestamp = new Date().toISOString()
-        const appointmentUpdated = db
+        const appointmentUpdated = await db
           .prepare(
             `UPDATE appointments
              SET status = 'completed', updated_at = ?
@@ -759,7 +784,7 @@ export async function appointmentRoutes(app) {
           throw lifecycleFailure('APPOINTMENT_UPDATE_FAILED')
         }
 
-        const classroomUpdated = db
+        const classroomUpdated = await db
           .prepare(
             `UPDATE classrooms
              SET status = 'closed',
@@ -774,7 +799,7 @@ export async function appointmentRoutes(app) {
 
         const otherParticipantId =
           role === 'student' ? classroom.teacher_id : classroom.student_id
-        insertNotification(db, {
+        await insertNotification(db, {
           userId: otherParticipantId,
           type: 'appointment.completed',
           title: '课堂已完成',
@@ -784,7 +809,7 @@ export async function appointmentRoutes(app) {
             role === 'student' ? '/teacher/teachingDocking' : '/student/home',
           dedupeKey: `appointment:${classroom.id}:completed:${otherParticipantId}`
         })
-        insertAudit(db, request, {
+        await insertAudit(db, request, {
           action: 'appointment.completed',
           appointmentId: classroom.id,
           details: {
@@ -800,7 +825,7 @@ export async function appointmentRoutes(app) {
 
       let outcome
       try {
-        outcome = complete()
+        outcome = await complete()
       } catch (error) {
         if (error.lifecycleCode) {
           request.log.error(
@@ -827,7 +852,7 @@ export async function appointmentRoutes(app) {
 
       return responseData(
         reply,
-        appointmentData(findAppointment(db, outcome.appointmentId)),
+        appointmentData(await findAppointment(db, outcome.appointmentId)),
         '课堂已完成'
       )
     }
@@ -837,7 +862,7 @@ export async function appointmentRoutes(app) {
     '/api/v1/classrooms/:id/join-info',
     { preHandler: app.authenticate },
     async (request, reply) => {
-      const classroom = db
+      const classroom = await db
         .prepare(
           `SELECT
             classroom.id,

@@ -2,13 +2,25 @@ import nodemailer from 'nodemailer'
 
 export function createMailProvider({
   smtpUrl,
+  smtpHost,
+  smtpPort,
+  smtpSecure,
+  smtpUser,
+  smtpPass,
   mailFrom,
   transportFactory = nodemailer.createTransport
 } = {}) {
-  if (!smtpUrl) return null
+  if (!smtpUrl && !(smtpHost && smtpUser && smtpPass)) return null
 
   const transporter = transportFactory({
-    url: smtpUrl,
+    ...(smtpUrl
+      ? { url: smtpUrl }
+      : {
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpSecure,
+          auth: { user: smtpUser, pass: smtpPass }
+        }),
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,

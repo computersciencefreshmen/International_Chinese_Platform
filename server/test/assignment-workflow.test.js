@@ -5,7 +5,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import assignmentRoutes from '../routes/assignments.js'
@@ -18,23 +18,23 @@ function body(response) {
   return JSON.parse(response.body)
 }
 
-function addUser(database, role, displayName) {
+async function addUser(database, role, displayName) {
   const id = randomUUID()
-  database
+  await database
     .prepare(
       `INSERT INTO users (
         id, email, password_hash, role, display_name, status
       ) VALUES (?, ?, ?, ?, ?, 'active')`
     )
     .run(id, `${role}-${id}@assignment.test`, 'x'.repeat(64), role, displayName)
-  const session = createSession(database, id, { ttlSeconds: 3600 })
+  const session = await createSession(database, id, { ttlSeconds: 3600 })
 
   return { id, role, headers: bearer(session.token) }
 }
 
-function addCourse(database, teacherId, status = 'published') {
+async function addCourse(database, teacherId, status = 'published') {
   const id = randomUUID()
-  database
+  await database
     .prepare(
       `INSERT INTO courses (
         id, teacher_id, title, summary, description, level, category,
@@ -52,7 +52,7 @@ function addCourse(database, teacherId, status = 'published') {
 }
 
 async function createAssignmentTestApp(t) {
-  const database = createDatabase({ filename: ':memory:' })
+  const database = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', database)
 
@@ -68,7 +68,7 @@ async function createAssignmentTestApp(t) {
 
   t.after(async () => {
     await app.close()
-    database.close()
+    await database.close()
   })
 
   return { app, database }
@@ -102,10 +102,10 @@ function assignmentPayload(title = '第一单元作业') {
 
 test('student submission, teacher grading and student result form a complete workflow', async (t) => {
   const { app, database } = await createAssignmentTestApp(t)
-  const student = addUser(database, 'student', '测试学生')
-  const teacher = addUser(database, 'teacher', '王老师')
-  const otherTeacher = addUser(database, 'teacher', '李老师')
-  const courseId = addCourse(database, teacher.id)
+  const student = await addUser(database, 'student', '测试学生')
+  const teacher = await addUser(database, 'teacher', '王老师')
+  const otherTeacher = await addUser(database, 'teacher', '李老师')
+  const courseId = await addCourse(database, teacher.id)
 
   const created = await app.inject({
     method: 'POST',
@@ -277,31 +277,35 @@ test('student submission, teacher grading and student result form a complete wor
   )
 
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE user_id = ? AND type = 'submission.graded' AND resource_id = ?`
-      )
-      .get(student.id, submissionId).count,
+        )
+        .get(student.id, submissionId)
+    ).count,
     1
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'submission.graded' AND entity_id = ?`
-      )
-      .get(submissionId).count,
+        )
+        .get(submissionId)
+    ).count,
     1
   )
 })
 
 test('assignment visibility, ownership and state transitions stay explicit', async (t) => {
   const { app, database } = await createAssignmentTestApp(t)
-  const student = addUser(database, 'student', '学生乙')
-  const teacher = addUser(database, 'teacher', '教师乙')
-  const otherTeacher = addUser(database, 'teacher', '教师丙')
-  const draftCourseId = addCourse(database, teacher.id, 'draft')
+  const student = await addUser(database, 'student', '学生乙')
+  const teacher = await addUser(database, 'teacher', '教师乙')
+  const otherTeacher = await addUser(database, 'teacher', '教师丙')
+  const draftCourseId = await addCourse(database, teacher.id, 'draft')
 
   const invalidPoints = await app.inject({
     method: 'POST',
@@ -386,10 +390,10 @@ test('assignment visibility, ownership and state transitions stay explicit', asy
 
 test('expired deadlines reject publishing and submission without partial writes', async (t) => {
   const { app, database } = await createAssignmentTestApp(t)
-  const student = addUser(database, 'student', '截止时间学生')
-  const secondStudent = addUser(database, 'student', '逾期新学生')
-  const teacher = addUser(database, 'teacher', '截止时间教师')
-  const courseId = addCourse(database, teacher.id)
+  const student = await addUser(database, 'student', '截止时间学生')
+  const secondStudent = await addUser(database, 'student', '逾期新学生')
+  const teacher = await addUser(database, 'teacher', '截止时间教师')
+  const courseId = await addCourse(database, teacher.id)
 
   const expiredDraft = await app.inject({
     method: 'POST',
@@ -411,18 +415,22 @@ test('expired deadlines reject publishing and submission without partial writes'
   assert.equal(expiredPublish.statusCode, 409)
   assert.match(body(expiredPublish).msg, /截止时间已过/)
   assert.equal(
-    database
-      .prepare('SELECT status FROM assignments WHERE id = ?')
-      .get(expiredDraftId).status,
+    (
+      await database
+        .prepare('SELECT status FROM assignments WHERE id = ?')
+        .get(expiredDraftId)
+    ).status,
     'draft'
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'assignment.published' AND entity_id = ?`
-      )
-      .get(expiredDraftId).count,
+        )
+        .get(expiredDraftId)
+    ).count,
     0
   )
 
@@ -457,7 +465,7 @@ test('expired deadlines reject publishing and submission without partial writes'
   assert.equal(initialDraft.statusCode, 201)
   const submissionId = body(initialDraft).data.id
 
-  database
+  await database
     .prepare('UPDATE assignments SET due_at = ? WHERE id = ?')
     .run(new Date(Date.now() - 60_000).toISOString(), assignmentId)
 
@@ -502,7 +510,7 @@ test('expired deadlines reject publishing and submission without partial writes'
   assert.match(body(lateSubmit).msg, /超过截止时间/)
   assert.match(body(lateSubmit).data.draftPolicy, /仍可保存/)
 
-  const storedSubmission = database
+  const storedSubmission = await database
     .prepare('SELECT * FROM submissions WHERE id = ?')
     .get(submissionId)
   assert.equal(storedSubmission.status, 'draft')
@@ -510,40 +518,46 @@ test('expired deadlines reject publishing and submission without partial writes'
     [choiceQuestion.id]: '再见'
   })
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM submissions
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM submissions
          WHERE assignment_id = ? AND student_id = ?`
-      )
-      .get(assignmentId, secondStudent.id).count,
+        )
+        .get(assignmentId, secondStudent.id)
+    ).count,
     0
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'submission.submitted' AND entity_id = ?`
-      )
-      .get(submissionId).count,
+        )
+        .get(submissionId)
+    ).count,
     0
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE type = 'assignment.submitted' AND resource_id = ?`
-      )
-      .get(submissionId).count,
+        )
+        .get(submissionId)
+    ).count,
     0
   )
 })
 
 test('closing and archiving block writes while keeping assignment details readable', async (t) => {
   const { app, database } = await createAssignmentTestApp(t)
-  const student = addUser(database, 'student', '状态流转学生')
-  const teacher = addUser(database, 'teacher', '状态流转教师')
-  const otherTeacher = addUser(database, 'teacher', '越权教师')
-  const courseId = addCourse(database, teacher.id)
+  const student = await addUser(database, 'student', '状态流转学生')
+  const teacher = await addUser(database, 'teacher', '状态流转教师')
+  const otherTeacher = await addUser(database, 'teacher', '越权教师')
+  const courseId = await addCourse(database, teacher.id)
 
   const closedDraft = await app.inject({
     method: 'POST',
@@ -566,18 +580,22 @@ test('closing and archiving block writes while keeping assignment details readab
   })
   assert.equal(forbiddenClose.statusCode, 403)
   assert.equal(
-    database
-      .prepare('SELECT status FROM assignments WHERE id = ?')
-      .get(closedAssignmentId).status,
+    (
+      await database
+        .prepare('SELECT status FROM assignments WHERE id = ?')
+        .get(closedAssignmentId)
+    ).status,
     'published'
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'assignment.closed' AND entity_id = ?`
-      )
-      .get(closedAssignmentId).count,
+        )
+        .get(closedAssignmentId)
+    ).count,
     0
   )
 
@@ -589,12 +607,14 @@ test('closing and archiving block writes while keeping assignment details readab
   assert.equal(closed.statusCode, 200)
   assert.equal(body(closed).data.status, 'closed')
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'assignment.closed' AND entity_id = ?`
-      )
-      .get(closedAssignmentId).count,
+        )
+        .get(closedAssignmentId)
+    ).count,
     1
   )
 
@@ -616,11 +636,13 @@ test('closing and archiving block writes while keeping assignment details readab
   assert.equal(closedSubmit.statusCode, 409)
   assert.match(body(closedSubmit).msg, /已关闭/)
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM submissions WHERE assignment_id = ?'
-      )
-      .get(closedAssignmentId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM submissions WHERE assignment_id = ?'
+        )
+        .get(closedAssignmentId)
+    ).count,
     0
   )
 
@@ -631,12 +653,14 @@ test('closing and archiving block writes while keeping assignment details readab
   })
   assert.equal(secondClose.statusCode, 409)
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audit_logs
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM audit_logs
          WHERE action = 'assignment.closed' AND entity_id = ?`
-      )
-      .get(closedAssignmentId).count,
+        )
+        .get(closedAssignmentId)
+    ).count,
     1
   )
 
@@ -653,7 +677,7 @@ test('closing and archiving block writes while keeping assignment details readab
     headers: teacher.headers
   })
   assert.equal(archivedPublished.statusCode, 200)
-  database
+  await database
     .prepare(
       "UPDATE courses SET status = 'archived', published_at = NULL WHERE id = ?"
     )
@@ -676,11 +700,13 @@ test('closing and archiving block writes while keeping assignment details readab
   assert.equal(archivedSubmit.statusCode, 409)
   assert.match(body(archivedSubmit).msg, /课程已归档/)
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM submissions WHERE assignment_id = ?'
-      )
-      .get(archivedAssignmentId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM submissions WHERE assignment_id = ?'
+        )
+        .get(archivedAssignmentId)
+    ).count,
     0
   )
 })

@@ -34,10 +34,69 @@ function boolean(value, fallback, name) {
   throw new TypeError(`${name} must be a boolean value`)
 }
 
+function proxyTrust(value, fallback = false) {
+  if (value === undefined || value === '') return fallback
+  const normalized = String(value).trim().toLowerCase()
+  if (normalized === '0') return false
+  if (/^[1-9]\d*$/.test(normalized)) {
+    const hops = Number(normalized)
+    if (hops <= 10) return hops
+    throw new TypeError('TRUST_PROXY hop count must be between 1 and 10')
+  }
+  return boolean(value, fallback, 'TRUST_PROXY')
+}
+
 function localPath(value, fallback) {
   const target = value || fallback
   if (target === ':memory:') return target
   return isAbsolute(target) ? target : resolve(PROJECT_ROOT, target)
+}
+
+function httpOrigin(value, name, { production = false } = {}) {
+  let parsed
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new TypeError(`${name} must be a valid HTTP(S) origin`)
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol) ||
+    parsed.origin !== value.replace(/\/$/, '')
+  ) {
+    throw new TypeError(`${name} must contain only an HTTP(S) origin`)
+  }
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)
+  if (production && parsed.protocol !== 'https:' && !loopback) {
+    throw new TypeError(`${name} must use HTTPS in production`)
+  }
+  return parsed.origin
+}
+
+function websocketOrigin(value, { production = false } = {}) {
+  let parsed
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new TypeError('PUBLIC_WEBSOCKET_ORIGIN must be a valid origin')
+  }
+  if (['http:', 'https:'].includes(parsed.protocol)) {
+    parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
+  }
+  if (
+    !['ws:', 'wss:'].includes(parsed.protocol) ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new TypeError(
+      'PUBLIC_WEBSOCKET_ORIGIN must contain only a WS(S) origin'
+    )
+  }
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)
+  if (production && parsed.protocol !== 'wss:' && !loopback) {
+    throw new TypeError('PUBLIC_WEBSOCKET_ORIGIN must use WSS in production')
+  }
+  return parsed.origin
 }
 
 export function loadConfig(env = process.env) {
@@ -48,24 +107,35 @@ export function loadConfig(env = process.env) {
     )
   }
   const isProduction = nodeEnv === 'production'
-  const appOrigin = env.APP_ORIGIN || 'http://localhost:5173'
-  let parsedOrigin
-  try {
-    parsedOrigin = new URL(appOrigin)
-  } catch {
-    throw new TypeError('APP_ORIGIN must be a valid HTTP(S) origin')
-  }
-  if (
-    !['http:', 'https:'].includes(parsedOrigin.protocol) ||
-    parsedOrigin.origin !== appOrigin.replace(/\/$/, '')
-  ) {
-    throw new TypeError('APP_ORIGIN must contain only an HTTP(S) origin')
-  }
-  const loopbackOrigin = ['localhost', '127.0.0.1', '::1'].includes(
-    parsedOrigin.hostname
+  const appOrigins = (
+    env.APP_ORIGINS ||
+    env.APP_ORIGIN ||
+    'http://localhost:5173'
   )
-  if (isProduction && parsedOrigin.protocol !== 'https:' && !loopbackOrigin) {
-    throw new TypeError('Production APP_ORIGIN must use HTTPS')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) =>
+      httpOrigin(origin, 'APP_ORIGINS', { production: isProduction })
+    )
+  if (
+    appOrigins.length === 0 ||
+    new Set(appOrigins).size !== appOrigins.length
+  ) {
+    throw new TypeError('APP_ORIGINS must contain unique HTTP(S) origins')
+  }
+  const loopbackOrigin = appOrigins.every((origin) => {
+    const hostname = new URL(origin).hostname
+    return ['localhost', '127.0.0.1', '::1'].includes(hostname)
+  })
+
+  const publicWebsocketOrigin = websocketOrigin(
+    env.PUBLIC_WEBSOCKET_ORIGIN || appOrigins[0],
+    { production: isProduction }
+  )
+
+  if (isProduction && !env.DATABASE_URL) {
+    throw new TypeError('DATABASE_URL is required in production')
   }
 
   const verificationCodeSecret = env.VERIFICATION_CODE_SECRET || ''
@@ -82,6 +152,14 @@ export function loadConfig(env = process.env) {
   )
   if (isProduction && !loopbackOrigin && !secureCookies) {
     throw new TypeError('SECURE_COOKIES cannot be disabled for a public origin')
+  }
+  const allowBearer = boolean(
+    env.ALLOW_BEARER_AUTH,
+    !isProduction,
+    'ALLOW_BEARER_AUTH'
+  )
+  if (isProduction && allowBearer) {
+    throw new TypeError('ALLOW_BEARER_AUTH must be disabled in production')
   }
 
   const aiApiUrl = env.AI_API_URL || ''
@@ -133,15 +211,39 @@ export function loadConfig(env = process.env) {
       'UPLOAD_TOTAL_QUOTA_BYTES must be greater than or equal to UPLOAD_OWNER_QUOTA_BYTES'
     )
   }
+  const seedOnStart = boolean(
+    env.SEED_ON_START,
+    nodeEnv !== 'production',
+    'SEED_ON_START'
+  )
+  if (isProduction && seedOnStart) {
+    throw new TypeError(
+      'SEED_ON_START cannot be enabled in production; seed test data explicitly before startup'
+    )
+  }
+
+  const trustProxy = proxyTrust(env.TRUST_PROXY)
+  if (isProduction && !loopbackOrigin && !Number.isInteger(trustProxy)) {
+    throw new TypeError(
+      'TRUST_PROXY must be an explicit hop count for a public production origin'
+    )
+  }
 
   return Object.freeze({
     nodeEnv,
     isProduction,
     host: env.HOST || '127.0.0.1',
     port: integer(env.PORT, 7777, 'PORT', { max: 65_535 }),
-    appOrigin: parsedOrigin.origin,
-    databasePath: localPath(env.DATABASE_PATH, '.data/platform.db'),
-    uploadDir: localPath(env.UPLOAD_DIR, '.data/uploads'),
+    appOrigin: appOrigins[0],
+    appOrigins: Object.freeze(appOrigins),
+    publicWebsocketOrigin,
+    databaseUrl:
+      env.DATABASE_URL ||
+      'postgresql://platform:platform@127.0.0.1:5432/platform',
+    databaseSsl: boolean(env.DATABASE_SSL, isProduction, 'DATABASE_SSL'),
+    databasePoolMax: integer(env.DATABASE_POOL_MAX, 10, 'DATABASE_POOL_MAX', {
+      max: 50
+    }),
     uploadOwnerQuotaBytes,
     uploadTotalQuotaBytes,
     uploadMaxConcurrent: integer(
@@ -158,17 +260,28 @@ export function loadConfig(env = process.env) {
     sessionTtlSeconds: sessionTtlHours * 60 * 60,
     verificationCodeSecret,
     secureCookies,
-    allowBearer: boolean(env.ALLOW_BEARER_AUTH, true, 'ALLOW_BEARER_AUTH'),
-    trustProxy: boolean(env.TRUST_PROXY, false, 'TRUST_PROXY'),
+    allowBearer,
+    trustProxy,
     logger: boolean(env.LOGGER, nodeEnv !== 'test', 'LOGGER'),
-    seedOnStart: boolean(
-      env.SEED_ON_START,
-      nodeEnv !== 'production',
-      'SEED_ON_START'
-    ),
+    seedOnStart,
     smtpUrl,
+    smtpHost: env.SMTP_HOST || '',
+    smtpPort: integer(env.SMTP_PORT, 465, 'SMTP_PORT', { max: 65_535 }),
+    smtpSecure: boolean(env.SMTP_SECURE, true, 'SMTP_SECURE'),
+    smtpUser: env.SMTP_USER || '',
+    smtpPass: env.SMTP_PASS || '',
     mailFrom:
       env.MAIL_FROM || 'International Chinese Platform <no-reply@localhost>',
+    s3Endpoint: env.S3_ENDPOINT || '',
+    s3Region: env.S3_REGION || 'auto',
+    s3Bucket: env.S3_BUCKET || '',
+    s3AccessKeyId: env.S3_ACCESS_KEY_ID || '',
+    s3SecretAccessKey: env.S3_SECRET_ACCESS_KEY || '',
+    s3ForcePathStyle: boolean(
+      env.S3_FORCE_PATH_STYLE,
+      !isProduction,
+      'S3_FORCE_PATH_STYLE'
+    ),
     aiApiUrl,
     aiApiKey: env.AI_API_KEY || '',
     turnUrl: env.TURN_URL || '',

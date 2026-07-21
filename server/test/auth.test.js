@@ -4,7 +4,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import authRoutes from '../routes/auth.js'
@@ -26,7 +26,7 @@ function cookieToken(cookieValue) {
 }
 
 async function createAuthTestApp(t) {
-  const db = createDatabase({ filename: ':memory:' })
+  const db = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', db)
 
@@ -49,7 +49,7 @@ async function createAuthTestApp(t) {
   await app.ready()
   t.after(async () => {
     await app.close()
-    db.close()
+    await db.close()
   })
 
   return { app, db }
@@ -98,7 +98,7 @@ test('register creates a cookie session without exposing its token', async (t) =
 
   const sessionCookie = cookieHeader(response)
   const rawToken = cookieToken(sessionCookie)
-  const storedSession = db
+  const storedSession = await db
     .prepare('SELECT token_hash FROM sessions LIMIT 1')
     .get()
 
@@ -132,7 +132,7 @@ test('teacher registration creates an active account pending administrator verif
   })
 
   assert.equal(response.statusCode, 201)
-  const teacher = db
+  const teacher = await db
     .prepare(
       `SELECT u.status, tp.verified_at
        FROM users AS u
@@ -243,13 +243,19 @@ test('profile updates are scoped to the authenticated account', async (t) => {
   assert.equal(response.statusCode, 200)
   assert.equal(readBody(response).data.displayName, '更新后的昵称')
   assert.equal(
-    db.prepare('SELECT display_name FROM users WHERE id = ?').get(firstId)
-      .display_name,
+    (
+      await db
+        .prepare('SELECT display_name FROM users WHERE id = ?')
+        .get(firstId)
+    ).display_name,
     '更新后的昵称'
   )
   assert.equal(
-    db.prepare('SELECT display_name FROM users WHERE id = ?').get(secondId)
-      .display_name,
+    (
+      await db
+        .prepare('SELECT display_name FROM users WHERE id = ?')
+        .get(secondId)
+    ).display_name,
     '第二位学生'
   )
 })
@@ -363,7 +369,7 @@ test('logout revokes the session and bearer authentication remains API-compatibl
   })
   assert.equal(revoked.statusCode, 401)
 
-  const apiSession = createSession(db, user.id, { ttlSeconds: 3600 })
+  const apiSession = await createSession(db, user.id, { ttlSeconds: 3600 })
   const bearerResponse = await app.inject({
     method: 'GET',
     url: '/api/v1/auth/session',
@@ -391,4 +397,60 @@ test('cookie-authenticated writes reject an untrusted Origin', async (t) => {
 
   assert.equal(response.statusCode, 403)
   assert.equal(readBody(response).msg, '请求来源不受信任')
+})
+
+test('temporary credentials require a password reset after session restore', async (t) => {
+  const { app, db } = await createAuthTestApp(t)
+  const registration = await register(app)
+  const user = readBody(registration).data
+  const sessionCookie = cookieHeader(registration)
+
+  await db
+    .prepare('UPDATE users SET must_reset_password = true WHERE id = ?')
+    .run(user.id)
+
+  const restored = await app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/session',
+    headers: { cookie: sessionCookie }
+  })
+  assert.equal(restored.statusCode, 200)
+  assert.equal(readBody(restored).data.mustResetPassword, true)
+
+  const blocked = await app.inject({
+    method: 'GET',
+    url: '/api/v1/me',
+    headers: { cookie: sessionCookie }
+  })
+  assert.equal(blocked.statusCode, 403)
+  assert.equal(readBody(blocked).data.reason, 'PASSWORD_RESET_REQUIRED')
+
+  const changed = await app.inject({
+    method: 'PATCH',
+    url: '/api/v1/me/password',
+    headers: { cookie: sessionCookie },
+    payload: {
+      currentPassword: 'Secure123!',
+      newPassword: 'NewSecure456!',
+      confirmPassword: 'NewSecure456!'
+    }
+  })
+  assert.equal(changed.statusCode, 200)
+  assert.equal(readBody(changed).data.mustResetPassword, false)
+
+  const replacementCookie = cookieHeader(changed)
+  const replacementSession = await app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/session',
+    headers: { cookie: replacementCookie }
+  })
+  assert.equal(replacementSession.statusCode, 200)
+  assert.equal(readBody(replacementSession).data.mustResetPassword, false)
+
+  const allowed = await app.inject({
+    method: 'GET',
+    url: '/api/v1/me',
+    headers: { cookie: replacementCookie }
+  })
+  assert.equal(allowed.statusCode, 200)
 })

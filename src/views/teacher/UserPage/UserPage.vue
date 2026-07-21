@@ -1,10 +1,12 @@
 <script setup>
 import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import NotificationCenter from '@/components/account/NotificationCenter.vue'
 import PasswordForm from '@/components/account/PasswordForm.vue'
 import ProfileForm from '@/components/account/ProfileForm.vue'
 
-const activeTab = ref('profile')
+const route = useRoute()
+const activeTab = ref(route.query.tab === 'security' ? 'security' : 'profile')
 </script>
 
 <template>

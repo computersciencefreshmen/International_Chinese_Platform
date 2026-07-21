@@ -5,7 +5,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { hashPassword } from '../lib/password.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
@@ -16,7 +16,7 @@ function authorization(token) {
 }
 
 async function createTestApp(t) {
-  const db = createDatabase({ filename: ':memory:' })
+  const db = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', db)
   await app.register(cookie)
@@ -36,28 +36,32 @@ async function createTestApp(t) {
     ['teacher', 'teacher']
   ]) {
     const id = randomUUID()
-    db.prepare(
-      `INSERT INTO users (
+    await db
+      .prepare(
+        `INSERT INTO users (
         id, email, password_hash, role, display_name, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
-    ).run(id, `${name}@profile.test`, passwordHash, role, name, now, now)
+      )
+      .run(id, `${name}@profile.test`, passwordHash, role, name, now, now)
     users[name] = {
       id,
-      token: createSession(db, id, { ttlSeconds: 3600 }).token
+      token: (await createSession(db, id, { ttlSeconds: 3600 })).token
     }
   }
-  db.prepare(
-    `INSERT INTO teacher_profiles (
+  await db
+    .prepare(
+      `INSERT INTO teacher_profiles (
       user_id, school, title, experience_years, specialties_json,
       certificates_json, teaching_style_json, languages_json,
       verified_at, created_at, updated_at
     ) VALUES (?, '初始学校', '讲师', 2, '["口语"]', '[]', '[]', '["中文"]', ?, ?, ?)`
-  ).run(users.teacher.id, now, now, now)
+    )
+    .run(users.teacher.id, now, now, now)
 
   await app.ready()
   t.after(async () => {
     await app.close()
-    db.close()
+    await db.close()
   })
   return { app, db, users }
 }
@@ -102,21 +106,25 @@ test('teacher can read and update professional profile fields atomically', async
   ])
   assert.equal(updated.json().data.teacherProfile.verifiedAt, null)
   assert.equal(
-    db
-      .prepare(
-        'SELECT hourly_rate_cents FROM teacher_profiles WHERE user_id = ?'
-      )
-      .get(users.teacher.id).hourly_rate_cents,
+    (
+      await db
+        .prepare(
+          'SELECT hourly_rate_cents FROM teacher_profiles WHERE user_id = ?'
+        )
+        .get(users.teacher.id)
+    ).hourly_rate_cents,
     18800
   )
   assert.equal(
-    db
-      .prepare(
-        `SELECT COUNT(*) AS count
+    (
+      await db
+        .prepare(
+          `SELECT COUNT(*) AS count
          FROM audit_logs
          WHERE action = 'teacher.verification.reset' AND entity_id = ?`
-      )
-      .get(users.teacher.id).count,
+        )
+        .get(users.teacher.id)
+    ).count,
     1
   )
 })
@@ -131,11 +139,13 @@ test('student cannot write teacher profile fields', async (t) => {
   })
   assert.equal(response.statusCode, 403)
   assert.equal(
-    db
-      .prepare(
-        'SELECT COUNT(*) AS count FROM teacher_profiles WHERE user_id = ?'
-      )
-      .get(users.student.id).count,
+    (
+      await db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM teacher_profiles WHERE user_id = ?'
+        )
+        .get(users.student.id)
+    ).count,
     0
   )
 })
