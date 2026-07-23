@@ -142,6 +142,8 @@ export async function authRoutes(app) {
   const verificationSecret =
     app.config?.verificationCodeSecret || 'local-development-only-secret'
   const mailProvider = createMailProvider({
+    mailRelayUrl: app.config?.mailRelayUrl,
+    mailRelaySecret: app.config?.mailRelaySecret,
     smtpUrl: app.config?.smtpUrl,
     smtpHost: app.config?.smtpHost,
     smtpPort: app.config?.smtpPort,
@@ -151,6 +153,7 @@ export async function authRoutes(app) {
     mailFrom: app.config?.mailFrom
   })
   const mailConfigured = Boolean(
+    (app.config?.mailRelayUrl && app.config?.mailRelaySecret) ||
     app.config?.smtpUrl ||
     (app.config?.smtpHost && app.config?.smtpUser && app.config?.smtpPass)
   )

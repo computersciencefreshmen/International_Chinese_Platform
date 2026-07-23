@@ -38,3 +38,46 @@ test('public production rejects all-proxy trust', () => {
     /TRUST_PROXY must be an explicit hop count/
   )
 })
+
+test('mail relay configuration requires HTTPS and a strong paired secret', () => {
+  assert.throws(
+    () =>
+      loadConfig(
+        productionEnv({
+          MAIL_RELAY_URL: 'http://platform.example/api/mail-relay',
+          MAIL_RELAY_SECRET: 'x'.repeat(32)
+        })
+      ),
+    /credential-free HTTPS URL/
+  )
+  assert.throws(
+    () =>
+      loadConfig(
+        productionEnv({
+          MAIL_RELAY_URL: 'https://platform.example/api/mail-relay',
+          MAIL_RELAY_SECRET: 'too-short'
+        })
+      ),
+    /at least 32 characters/
+  )
+  assert.throws(
+    () =>
+      loadConfig(
+        productionEnv({
+          MAIL_RELAY_URL: 'https://platform.example/api/mail-relay'
+        })
+      ),
+    /must be configured together/
+  )
+})
+
+test('valid production mail relay configuration is exposed to the provider', () => {
+  const config = loadConfig(
+    productionEnv({
+      MAIL_RELAY_URL: 'https://platform.example/api/mail-relay',
+      MAIL_RELAY_SECRET: 'x'.repeat(32)
+    })
+  )
+  assert.equal(config.mailRelayUrl, 'https://platform.example/api/mail-relay')
+  assert.equal(config.mailRelaySecret, 'x'.repeat(32))
+})

@@ -175,6 +175,34 @@ export function loadConfig(env = process.env) {
     }
   }
 
+  const mailRelayUrl = env.MAIL_RELAY_URL || ''
+  const mailRelaySecret = env.MAIL_RELAY_SECRET || ''
+  if (Boolean(mailRelayUrl) !== Boolean(mailRelaySecret)) {
+    throw new TypeError(
+      'MAIL_RELAY_URL and MAIL_RELAY_SECRET must be configured together'
+    )
+  }
+  if (mailRelayUrl) {
+    let parsedRelayUrl
+    try {
+      parsedRelayUrl = new URL(mailRelayUrl)
+    } catch {
+      throw new TypeError('MAIL_RELAY_URL must be a valid HTTPS URL')
+    }
+    if (
+      parsedRelayUrl.protocol !== 'https:' ||
+      parsedRelayUrl.username ||
+      parsedRelayUrl.password ||
+      parsedRelayUrl.search ||
+      parsedRelayUrl.hash
+    ) {
+      throw new TypeError('MAIL_RELAY_URL must be a credential-free HTTPS URL')
+    }
+  }
+  if (mailRelaySecret && mailRelaySecret.length < 32) {
+    throw new TypeError('MAIL_RELAY_SECRET must contain at least 32 characters')
+  }
+
   const smtpUrl = env.SMTP_URL || ''
   if (smtpUrl) {
     let parsedSmtpUrl
@@ -264,6 +292,8 @@ export function loadConfig(env = process.env) {
     trustProxy,
     logger: boolean(env.LOGGER, nodeEnv !== 'test', 'LOGGER'),
     seedOnStart,
+    mailRelayUrl,
+    mailRelaySecret,
     smtpUrl,
     smtpHost: env.SMTP_HOST || '',
     smtpPort: integer(env.SMTP_PORT, 465, 'SMTP_PORT', { max: 65_535 }),
