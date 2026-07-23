@@ -44,6 +44,7 @@ function s3Client() {
     endpoint: required('S3_ENDPOINT'),
     region: process.env.S3_REGION || 'auto',
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+    requestChecksumCalculation: 'WHEN_REQUIRED',
     credentials: {
       accessKeyId: required('S3_ACCESS_KEY_ID'),
       secretAccessKey: required('S3_SECRET_ACCESS_KEY')

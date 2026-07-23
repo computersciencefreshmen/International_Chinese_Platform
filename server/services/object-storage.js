@@ -22,6 +22,7 @@ export function createObjectStorage(config = {}) {
     endpoint: config.s3Endpoint,
     region: config.s3Region,
     forcePathStyle: config.s3ForcePathStyle,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
     credentials: {
       accessKeyId: config.s3AccessKeyId,
       secretAccessKey: config.s3SecretAccessKey
