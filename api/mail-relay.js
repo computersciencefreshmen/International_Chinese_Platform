@@ -127,8 +127,13 @@ function relayConfig(env) {
   if (secret.length < 32) {
     throw new Error('MAIL_RELAY_SECRET must contain at least 32 characters')
   }
-  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS || !env.MAIL_FROM) {
-    throw new Error('SMTP relay configuration is incomplete')
+  const missing = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM'].filter(
+    (name) => !env[name]
+  )
+  if (missing.length > 0) {
+    throw new Error(
+      `SMTP relay configuration is missing: ${missing.join(', ')}`
+    )
   }
 
   const port = Number(env.SMTP_PORT || 465)
@@ -172,7 +177,10 @@ export function createMailRelayHandler({
     let config
     try {
       config = relayConfig(env)
-    } catch {
+    } catch (error) {
+      console.error('Mail relay configuration invalid', {
+        message: error?.message
+      })
       return json(503, { error: 'Mail relay is not configured' })
     }
 
