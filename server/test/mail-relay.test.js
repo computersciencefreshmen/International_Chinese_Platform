@@ -7,13 +7,13 @@ import { createMailRelayHandler } from '../../api/mail-relay.js'
 const NOW = Date.parse('2030-01-01T12:00:00.000Z')
 const SECRET = 'relay-secret-that-is-at-least-32-characters'
 const ENV = {
-  MAIL_RELAY_SECRET: SECRET,
-  SMTP_HOST: 'smtp.gmail.com',
-  SMTP_PORT: '465',
-  SMTP_SECURE: 'true',
-  SMTP_USER: 'owner@example.test',
-  SMTP_PASS: 'application-password',
-  MAIL_FROM: 'Platform <owner@example.test>'
+  MAIL_RELAY_SECRET: `${SECRET}\r`,
+  SMTP_HOST: 'smtp.gmail.com\r',
+  SMTP_PORT: '465\r',
+  SMTP_SECURE: 'true\r',
+  SMTP_USER: 'owner@example.test\r',
+  SMTP_PASS: 'application-password\r',
+  MAIL_FROM: 'Platform <owner@example.test>\r'
 }
 
 function signedRequest(payload, { timestamp, signature } = {}) {

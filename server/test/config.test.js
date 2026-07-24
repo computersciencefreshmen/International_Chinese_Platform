@@ -74,8 +74,8 @@ test('mail relay configuration requires HTTPS and a strong paired secret', () =>
 test('valid production mail relay configuration is exposed to the provider', () => {
   const config = loadConfig(
     productionEnv({
-      MAIL_RELAY_URL: 'https://platform.example/api/mail-relay',
-      MAIL_RELAY_SECRET: 'x'.repeat(32)
+      MAIL_RELAY_URL: 'https://platform.example/api/mail-relay\r',
+      MAIL_RELAY_SECRET: `${'x'.repeat(32)}\r`
     })
   )
   assert.equal(config.mailRelayUrl, 'https://platform.example/api/mail-relay')

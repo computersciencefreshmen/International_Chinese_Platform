@@ -123,36 +123,44 @@ function parsePayload(rawBody) {
 }
 
 function relayConfig(env) {
-  const secret = env.MAIL_RELAY_SECRET || ''
+  const secret = String(env.MAIL_RELAY_SECRET ?? '').trim()
   if (secret.length < 32) {
     throw new Error('MAIL_RELAY_SECRET must contain at least 32 characters')
   }
-  const missing = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM'].filter(
-    (name) => !env[name]
+  const smtp = Object.fromEntries(
+    ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM'].map((name) => [
+      name,
+      String(env[name] ?? '').trim()
+    ])
   )
+  const missing = Object.entries(smtp)
+    .filter(([, value]) => !value)
+    .map(([name]) => name)
   if (missing.length > 0) {
     throw new Error(
       `SMTP relay configuration is missing: ${missing.join(', ')}`
     )
   }
 
-  const port = Number(env.SMTP_PORT || 465)
+  const port = Number(String(env.SMTP_PORT ?? '465').trim())
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('SMTP_PORT is invalid')
   }
-  const secureText = String(env.SMTP_SECURE ?? 'true').toLowerCase()
+  const secureText = String(env.SMTP_SECURE ?? 'true')
+    .trim()
+    .toLowerCase()
   if (!['true', 'false'].includes(secureText)) {
     throw new Error('SMTP_SECURE is invalid')
   }
 
   return {
     secret,
-    smtpHost: env.SMTP_HOST,
+    smtpHost: smtp.SMTP_HOST,
     smtpPort: port,
     smtpSecure: secureText === 'true',
-    smtpUser: env.SMTP_USER,
-    smtpPass: env.SMTP_PASS,
-    mailFrom: env.MAIL_FROM
+    smtpUser: smtp.SMTP_USER,
+    smtpPass: smtp.SMTP_PASS,
+    mailFrom: smtp.MAIL_FROM
   }
 }
 

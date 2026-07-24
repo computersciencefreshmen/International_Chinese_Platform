@@ -175,8 +175,8 @@ export function loadConfig(env = process.env) {
     }
   }
 
-  const mailRelayUrl = env.MAIL_RELAY_URL || ''
-  const mailRelaySecret = env.MAIL_RELAY_SECRET || ''
+  const mailRelayUrl = String(env.MAIL_RELAY_URL ?? '').trim()
+  const mailRelaySecret = String(env.MAIL_RELAY_SECRET ?? '').trim()
   if (Boolean(mailRelayUrl) !== Boolean(mailRelaySecret)) {
     throw new TypeError(
       'MAIL_RELAY_URL and MAIL_RELAY_SECRET must be configured together'
