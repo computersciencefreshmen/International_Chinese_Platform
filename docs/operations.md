@@ -1,6 +1,6 @@
-# 公开 Beta 部署与运维手册
+# 公开 Beta 参考部署与运维手册
 
-本文档对应当前线上架构：Vercel 托管 Vue 前端和邮件中继函数，Railway 运行单实例 Fastify 与独立备份 Cron 服务，Railway PostgreSQL 保存业务数据，Cloudflare R2 私有 Bucket 保存文件与加密备份。
+本文档定义推荐的公开 Beta 部署拓扑：Vercel 托管 Vue 前端和邮件中继函数，Railway 运行单实例 Fastify 与独立备份 Cron 服务，Railway PostgreSQL 保存业务数据，Cloudflare R2 私有 Bucket 保存文件与加密备份。部署前应在自己的 Vercel/Railway/R2 账号中完成域名、Secret 与健康检查验收。
 
 ```text
 Browser ── HTTPS ──> Vercel ── /api/v1/* rewrite ──> Railway Fastify ──> PostgreSQL
