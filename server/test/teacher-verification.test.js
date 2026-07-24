@@ -5,7 +5,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import adminRoutes from '../routes/admin.js'
@@ -16,21 +16,21 @@ function bearer(token) {
   return { authorization: `Bearer ${token}` }
 }
 
-function addUser(database, role, displayName) {
+async function addUser(database, role, displayName) {
   const id = randomUUID()
-  database
+  await database
     .prepare(
       `INSERT INTO users (
         id, email, password_hash, role, display_name, status
       ) VALUES (?, ?, ?, ?, ?, 'active')`
     )
     .run(id, `${role}-${id}@example.test`, 'x'.repeat(64), role, displayName)
-  const session = createSession(database, id, { ttlSeconds: 3600 })
+  const session = await createSession(database, id, { ttlSeconds: 3600 })
   return { id, headers: bearer(session.token) }
 }
 
 async function createTestApp(t) {
-  const database = createDatabase({ filename: ':memory:' })
+  const database = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', database)
 
@@ -48,7 +48,7 @@ async function createTestApp(t) {
 
   t.after(async () => {
     await app.close()
-    database.close()
+    await database.close()
   })
 
   return { app, database }
@@ -60,10 +60,10 @@ function futureIso(minutes) {
 
 test('administrator approval and revocation gate public discovery and booking', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, 'student', '学习者')
-  const teacher = addUser(database, 'teacher', '待认证教师')
-  const administrator = addUser(database, 'administrator', '认证审核员')
-  database
+  const student = await addUser(database, 'student', '学习者')
+  const teacher = await addUser(database, 'teacher', '待认证教师')
+  const administrator = await addUser(database, 'administrator', '认证审核员')
+  await database
     .prepare(
       `INSERT INTO teacher_profiles (
         user_id, school, title, certificates_json, verified_at
@@ -76,7 +76,7 @@ test('administrator approval and revocation gate public discovery and booking', 
       JSON.stringify(['国际中文教师证书'])
     )
   const courseId = randomUUID()
-  database
+  await database
     .prepare(
       `INSERT INTO courses (
         id, teacher_id, title, status, published_at
@@ -153,7 +153,7 @@ test('administrator approval and revocation gate public discovery and booking', 
   assert.equal(approved.json().data.verificationStatus, 'verified')
   assert.ok(approved.json().data.verifiedAt)
 
-  const approvalAudit = database
+  const approvalAudit = await database
     .prepare(
       `SELECT actor_id, details_json, created_at
        FROM audit_logs
@@ -164,12 +164,14 @@ test('administrator approval and revocation gate public discovery and booking', 
   assert.equal(JSON.parse(approvalAudit.details_json).nextStatus, 'verified')
   assert.ok(approvalAudit.created_at)
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE user_id = ? AND type = 'teacher.verification.approved'`
-      )
-      .get(teacher.id).count,
+        )
+        .get(teacher.id)
+    ).count,
     1
   )
 
@@ -231,7 +233,7 @@ test('administrator approval and revocation gate public discovery and booking', 
   })
   assert.equal(publicAfterRevocation.statusCode, 404)
 
-  const revokedAudit = database
+  const revokedAudit = await database
     .prepare(
       `SELECT actor_id, details_json, created_at
        FROM audit_logs
@@ -242,12 +244,14 @@ test('administrator approval and revocation gate public discovery and booking', 
   assert.equal(JSON.parse(revokedAudit.details_json).nextStatus, 'pending')
   assert.ok(revokedAudit.created_at)
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM notifications
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM notifications
          WHERE user_id = ? AND type = 'teacher.verification.revoked'`
-      )
-      .get(teacher.id).count,
+        )
+        .get(teacher.id)
+    ).count,
     1
   )
 })

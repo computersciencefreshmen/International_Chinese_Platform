@@ -287,7 +287,9 @@ async function connectSocket() {
   try {
     const ticket = await createClassroomTicket(classroomId.value)
     if (intentionalClose) return
-    socket = new WebSocket(socketUrl(ticket.websocketPath))
+    socket = new WebSocket(
+      ticket.websocketUrl || socketUrl(ticket.websocketPath)
+    )
     socket.addEventListener('open', () => {
       connectionStatus.value = 'open'
       reconnectAttempts = 0

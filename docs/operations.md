@@ -1,218 +1,170 @@
-# 生产部署与运维手册
+# 公开 Beta 部署与运维手册
 
-本手册面向单机 Docker Compose 生产部署。平台是一个 Vue 3 + Fastify + SQLite 的模块化单体：同一进程提供编译后的前端、`/api/v1` API（包括受权限控制的文件内容）和 `/ws` 实时连接。
-
-> SQLite 部署应始终保持一个应用副本。不要让多个容器通过网络文件系统共享同一数据库。如果需要水平扩展，应先将持久层迁移到适合多实例的数据库。
-
-## 1. 生产拓扑与持久数据
-
-Compose 默认只将 `127.0.0.1:7777` 暴露给宿主机，应由 Nginx、Caddy 或云负载均衡器终止 TLS：
+本文档对应当前线上架构：Vercel 托管 Vue 前端和邮件中继函数，Railway 运行单实例 Fastify 与独立备份 Cron 服务，Railway PostgreSQL 保存业务数据，Cloudflare R2 私有 Bucket 保存文件与加密备份。
 
 ```text
-Internet -> HTTPS reverse proxy -> 127.0.0.1:7777 -> Fastify
-                                                    |-- /app/data/platform.db
-                                                    `-- /app/uploads
+Browser ── HTTPS ──> Vercel ── /api/v1/* rewrite ──> Railway Fastify ──> PostgreSQL
+   │                                                    │
+   ├── presigned PUT ───────────────────────────────────┴────────> private R2
+   └── WSS /ws/classroom ───────────────────────────────────────> Railway
+
+Railway Fastify ── HMAC HTTPS ──> Vercel /api/mail-relay ── SMTP 465 ──> Gmail
+Railway Backup Cron ── pg_dump + AES-256-GCM ───────────────────────────> private R2
 ```
 
-两个命名卷分别保存数据库与用户上传文件：
+Beta 阶段只运行一个后端实例。实时房间状态保存在进程内；增加实例前必须引入跨实例广播与房间协调。
 
-| Compose 卷（默认物理名）                                         | 容器目录       | 内容                             |
-| ---------------------------------------------------------------- | -------------- | -------------------------------- |
-| `platform-database`（`international-chinese-platform-database`） | `/app/data`    | SQLite 主文件及 WAL/SHM 辅助文件 |
-| `platform-uploads`（`international-chinese-platform-uploads`）   | `/app/uploads` | 头像、作业和课程附件             |
+## 1. 生产变量
 
-镜像为多阶段 Node 24 构建，运行阶段不包含编译工具，以 UID/GID `10001` 的非 root 用户运行。Compose 另外启用只读根文件系统、临时 `/tmp`、全 capability 丢弃和 `no-new-privileges`。
+### Railway API
 
-## 2. 准备生产配置
-
-需要 Docker Engine 和 Docker Compose v2。先在部署机上创建不纳入 Git 的 `.env.production`，限制为仅部署用户可读：
+Railway 后端保存数据库、对象存储和邮件中继配置，但不保存 Gmail 应用密码：
 
 ```dotenv
-APP_ORIGIN=https://chinese.example.com
-APP_PORT=7777
-BIND_ADDRESS=127.0.0.1
-
-# 可选：稳定的 Docker 卷名，也可用于恢复时安全切换到新卷
-DATABASE_VOLUME_NAME=international-chinese-platform-database
-UPLOAD_VOLUME_NAME=international-chinese-platform-uploads
-
-# 默认用户 250 MiB、平台 5 GiB、最多 4 个并发上传；按容量规划调整
-UPLOAD_OWNER_QUOTA_BYTES=262144000
-UPLOAD_TOTAL_QUOTA_BYTES=5368709120
-UPLOAD_MAX_CONCURRENT=4
-
-# 至少 32 个 ASCII 字符的稳定随机值；不要在每次发布时更换
-VERIFICATION_CODE_SECRET=replace-with-at-least-32-random-characters
-
-SESSION_TTL_HOURS=12
+NODE_ENV=production
+HOST=0.0.0.0
+DATABASE_URL=<Railway PostgreSQL reference>
+DATABASE_SSL=true
+DATABASE_POOL_MAX=10
+APP_ORIGINS=https://international-chinese-platform.vercel.app
+PUBLIC_WEBSOCKET_ORIGIN=wss://<railway-public-domain>
 SECURE_COOKIES=true
-TRUST_PROXY=true
 ALLOW_BEARER_AUTH=false
+TRUST_PROXY=1
+SEED_ON_START=false
+VERIFICATION_CODE_SECRET=<at-least-32-random-characters>
+MAIL_RELAY_URL=https://international-chinese-platform.vercel.app/api/mail-relay
+MAIL_RELAY_SECRET=<shared-at-least-32-character-random-secret>
 
-# 生产注册验证邮件必需
-SMTP_URL=smtps://username:percent-encoded-password@smtp.example.com:465
-MAIL_FROM=International Chinese Platform <no-reply@example.com>
-
-# 可选外部能力
-AI_API_URL=
-AI_API_KEY=
-TURN_URL=
-TURN_USERNAME=
-TURN_CREDENTIAL=
+S3_ENDPOINT=https://<cloudflare-account-id>.r2.cloudflarestorage.com
+S3_REGION=auto
+S3_BUCKET=<private-production-bucket>
+S3_ACCESS_KEY_ID=<bucket-scoped-token-id>
+S3_SECRET_ACCESS_KEY=<bucket-scoped-token-secret>
+S3_FORCE_PATH_STYLE=false
 ```
 
-生成验证码密钥的一种方式是 `openssl rand -hex 32`。请使用密钥管理器或受限制的环境文件；不要把真实值写入镜像、Compose 文件、CI 日志或 shell 历史。注意 Docker 环境变量对具有容器检查权限的运维人员可见。
+`MAIL_RELAY_URL` 必须是无用户名、密码、查询参数和片段的 HTTPS URL。公开域名下 `TRUST_PROXY` 必须是明确跳数；不要配置成 `true`。
 
-`SEED_ON_START=false` 在生产 Compose 中是固定值：生产容器不会创建演示账号或演示数据。Compose 也不声明任何 `ADMIN_*` 变量。
+### Vercel 邮件中继
 
-## 3. 构建、启动与验证
+Railway Hobby 不提供 SMTP 出站能力，因此生产邮件由 Railway 通过 HTTPS 调用 Vercel Function。以下变量只配置在 Vercel 的目标环境：
+
+```dotenv
+MAIL_RELAY_SECRET=<same-value-as-railway>
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=yanghanyu2023@gmail.com
+SMTP_PASS=<Gmail application password>
+MAIL_FROM=International Chinese Platform <yanghanyu2023@gmail.com>
+```
+
+中继对 `timestamp + "." + raw JSON` 计算 HMAC-SHA-256，并只接受 5 分钟时间窗内、字段严格为 `email`、`code`、`expiresAt` 的请求。Railway 和 Vercel 必须共享同一个随机中继 Secret；Gmail 应用密码只存在于 Vercel，且变量不得使用 `VITE_` 前缀。
+
+真实 Secret 只录入 Railway/Cloudflare/Vercel，不写入 Git、聊天、构建参数或日志。
+
+## 2. R2 配置
+
+Bucket 必须保持私有。Token 只授予目标 Bucket 的对象读写权限。浏览器 CORS 仅允许正式 Vercel 域名和明确的 staging 域名：
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://international-chinese-platform.vercel.app"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+为 `tmp/` 前缀设置 1 天生命周期删除规则，作为数据库清理 Outbox 之外的兜底。上传只进入 `tmp/uploads/`；服务端完成大小、魔数和 SHA-256 校验后，按 ETag 条件复制到新的 `files/` Key。正式 Key 从不签发 PUT URL。
+
+## 3. 发布流程
+
+1. 合并前运行 `pnpm check` 和跨角色 Playwright E2E。
+2. 先在 Vercel 配置邮件中继和 SMTP 变量并部署 `/api/mail-relay`；无签名请求应返回 401。
+3. Railway 构建 `Dockerfile`；`railway.json` 的 pre-deploy 命令先运行 `node server/db/migrate.js`。
+4. `/api/v1/ready` 返回 200 后，让 Vercel 只转发版本化业务 API：
+
+   ```json
+   {
+     "source": "/api/v1/:path*",
+     "destination": "https://<railway-domain>/api/v1/:path*"
+   }
+   ```
+
+5. 将 SPA fallback 放在 rewrite 列表最后。不要转发整个 `/api/*`，否则 `/api/mail-relay` 会被误送到 Railway。
+6. 在 Railway 配置生产中继 URL 和共享 Secret；触发真实邮箱验证码，确认 API 不返回开发验证码。
+7. 刷新任意 SPA 路由，确认返回页面；请求不存在的 `/api/v1/*`，确认返回 JSON 404 而不是 `index.html`。
+8. 完成教师申请、管理员审核、课程、预约、课堂、作业全链路冒烟。
+
+生产环境会拒绝 `SEED_ON_START=true`。演示数据只能在本地或测试环境显式执行 `pnpm db:seed`。
+
+## 4. 管理员初始化
+
+空库迁移后，在 Railway 一次性任务中设置 `ADMIN_EMAIL`、`ADMIN_PASSWORD`、`ADMIN_DISPLAY_NAME`，执行：
 
 ```bash
-docker compose --env-file .env.production build --pull
-docker compose --env-file .env.production up -d
-docker compose --env-file .env.production ps
-docker compose --env-file .env.production logs --tail=100 app
+node server/db/bootstrap-admin.js
 ```
 
-首次启动会创建 SQLite 文件并自动应用未执行的有序迁移。两个探针的意义不同：
+命令只创建首个管理员，密码以 scrypt 保存，并标记为必须首次改密。成功后立刻删除 `ADMIN_PASSWORD` Secret。管理员登录后只能查看会话、退出或修改密码；其他 API 在改密前返回 `PASSWORD_RESET_REQUIRED`。
 
-- `GET /api/v1/health`：进程存活。
-- `GET /api/v1/ready`：应用就绪且数据库可读。Docker 健康检查使用此接口。
+## 5. 探针与监控
+
+- `/api/v1/health`：进程存活。
+- `/api/v1/ready`：PostgreSQL 不可用时返回 503；R2 不可用时返回 200 且状态为 `degraded`。
+- 监控 5xx、429、进程重启、数据库连接池耗尽、对象清理任务重试，以及 Railway 到中继和 Vercel 到 Gmail 的两段邮件失败。
+- 中继 401 通常表示 Secret、签名或时钟问题；502 表示 Gmail 投递失败；503 表示 Vercel 中继环境变量不完整。
+- Railway 与 Vercel 日志不得输出 Cookie、验证码、中继 Secret、SMTP 密码、数据库 URL 或 R2 Secret。
+- 监控独立备份服务的 Cron 执行状态，并定期确认最新加密对象已写入目标 Bucket。
+
+## 6. 备份与恢复
+
+独立 Railway 服务使用同一运行时镜像，并由 [`railway.backup.json`](../railway.backup.json) 在每天 `18:00 UTC`（北京时间次日 `02:00`）执行 `node server/ops/backup.js`。它使用 PostgreSQL 18 客户端的 `pg_dump --format=custom`，再以 AES-256-GCM 加密并上传私有 Bucket。较新的 `pg_dump` 也兼容本项目本地 PostgreSQL 15 环境。备份服务需要：
+
+```dotenv
+DATABASE_URL=<production database>
+DATABASE_SSL=true
+BACKUP_ENCRYPTION_KEY=<base64 encoded 32-byte key>
+S3_ENDPOINT=<same R2 endpoint as API>
+S3_REGION=auto
+S3_ACCESS_KEY_ID=<backup-capable token id>
+S3_SECRET_ACCESS_KEY=<backup-capable token secret>
+S3_BACKUP_BUCKET=international-chinese-platform-staging
+```
+
+当前公开 Beta 暂时复用 `international-chinese-platform-staging` 作为加密备份 Bucket，生产应用文件仍写入 production Bucket。它不是长期隔离方案：启用真实 staging 文件上传前，应创建专用私有备份 Bucket、迁移已加密对象并更新 `S3_BACKUP_BUCKET`。
+
+保留 7 个日备份和 4 个周备份。每次 Cron 后检查任务成功和新对象时间；每月在临时 PostgreSQL 实例执行恢复演练。
+
+恢复必须先在隔离环境验证。确认目标数据库允许被覆盖后设置 `BACKUP_FILE` 与 `CONFIRM_RESTORE=RESTORE`，运行 `node server/ops/restore.js`。目标 RPO 为 24 小时，RTO 为 4 小时。
+
+## 7. 回滚
+
+- 前端恢复上一版 Vercel Deployment。
+- 后端恢复上一版 Railway Image。
+- 首发迁移只做扩展型变更；回滚应用时保留新增表和字段，不立即执行破坏性 down migration。
+- 如数据损坏，先冻结写入、保存当前应急备份，再按最近一次已验证备份恢复。
+
+## 8. 本地一致环境
 
 ```bash
-curl --fail https://chinese.example.com/api/v1/health
-curl --fail https://chinese.example.com/api/v1/ready
+docker compose up -d postgres minio minio-init
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
 ```
 
-如果使用宿主目录替代命名卷，请先确保目录属于 `10001:10001` 且不对其他用户开放写权限，否则数据库或上传会因权限错误失败。
+本地 PostgreSQL 在 `127.0.0.1:5432`，MinIO API 在 `127.0.0.1:9000`，控制台在 `127.0.0.1:9001`。不要把 Compose 默认凭据用于公网。
 
-## 4. 反向代理与同源要求
+## 9. 已知 Beta 限制
 
-浏览器页面、API、上传文件与 WebSocket 必须对外使用完全相同的 scheme、host 和 port。`APP_ORIGIN` 必须精确等于这个公网 origin，不要带路径或末尾斜杠。一个 Nginx 示例如下：
-
-```nginx
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ''      close;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name chinese.example.com;
-
-    # ssl_certificate /etc/letsencrypt/live/chinese.example.com/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/chinese.example.com/privkey.pem;
-
-    client_max_body_size 50m;
-
-    location / {
-        proxy_pass http://127.0.0.1:7777;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 3600s;
-    }
-}
-```
-
-不要单独将 API 发布到另一个 origin。同源部署才能与默认的 HttpOnly/SameSite/Secure 会话 Cookie、来源检查和 WebSocket 路由保持一致。只有反向代理是受信边界时才设置 `TRUST_PROXY=true`，并确保应用端口不可被公网绕过。
-
-## 5. 首个管理员引导
-
-首次部署就绪后，通过一次性容器执行引导。密码必须至少 12 位，并同时包含大写字母、小写字母、数字和特殊字符。先在当前 shell 中安全注入下列三个变量：
-
-```text
-ADMIN_EMAIL
-ADMIN_PASSWORD
-ADMIN_DISPLAY_NAME
-```
-
-然后执行：
-
-```bash
-docker compose --env-file .env.production run --rm \
-  -e ADMIN_EMAIL -e ADMIN_PASSWORD -e ADMIN_DISPLAY_NAME \
-  app node server/db/bootstrap-admin.js
-```
-
-不要把密码直接写在命令行或 `.env.production` 中。成功后立即从 shell 清除三个变量。引导程序只允许创建第一个管理员；如果已存在管理员，它会拒绝覆盖。
-
-## 6. 数据库迁移与发布
-
-应用在打开数据库时检查 `schema_migrations` 台账，并在事务中按顺序应用新迁移。也可以在维护窗口显式执行：
-
-```bash
-docker compose --env-file .env.production stop app
-docker compose --env-file .env.production run --rm app node server/db/migrate.js
-docker compose --env-file .env.production up -d
-```
-
-推荐发布流程：
-
-1. 验证新镜像来源和依赖审计结果。
-2. 创建数据库与上传文件的一致备份。
-3. 在维护窗口停止应用并执行迁移。
-4. 启动新镜像，确认 `/ready`、登录、文件访问和 WebSocket 连接。
-5. 保留旧镜像与发布前备份，直到观察窗口结束。
-
-当前迁移是向前迁移，不提供自动 down migration。需要回滚数据结构时，请还原发布前备份，而不是手工删改生产表。
-
-## 7. 备份
-
-备份必须同时包含 `/app/data` 和 `/app/uploads`。只备份 SQLite 会丢失附件；只备份上传目录会丢失文件索引和权限关系。
-
-最简单可靠的方式是在短维护窗口执行冷备份：
-
-1. 确认磁盘空间，创建带 UTC 时间戳的宿主备份目录。
-2. 执行 `docker compose --env-file .env.production stop app`，等待优雅停机完成。
-3. 用 `docker compose --env-file .env.production cp app:/app/data/. <backup>/database` 复制完整数据目录。
-4. 用 `docker compose --env-file .env.production cp app:/app/uploads/. <backup>/uploads` 复制完整上传目录。
-5. 执行 `docker compose --env-file .env.production start app`，并确认 `/ready`。
-6. 压缩备份，生成 SHA-256 校验和，使用独立密钥加密，然后复制到另一存储位置。
-
-不要在应用写入期间用普通文件复制直接抓取 `platform.db`；WAL 模式下这样的副本可能不一致。如果业务无法接受短暂停机，请引入经验证的 SQLite 在线备份方案，并定期做恢复演练。
-
-建议至少保留每日 7 份、每周 4 份和每月 6 份，实际策略应按数据保留法规和可接受的 RPO/RTO 确定。
-
-## 8. 恢复演练
-
-先在隔离环境演练，再恢复生产。恢复前必须再做一份当前数据的应急备份。
-
-1. 校验备份的 SHA-256、解密并确认包含 `database/platform.db` 和 `uploads/`。
-2. 停止应用并做当前数据的应急备份，然后执行 `docker compose --env-file .env.production down`。不要附加 `--volumes`；原卷将作为回退点保留。
-3. 复制一份 `.env.production` 为受限制的 `.env.restore`，只将 `DATABASE_VOLUME_NAME` 和 `UPLOAD_VOLUME_NAME` 改为新的、带恢复时间戳的名称。
-4. 执行 `docker compose --env-file .env.restore create app`，让 Docker 创建干净卷和已停止的容器。
-5. 用 `docker compose --env-file .env.restore cp <backup>/database/. app:/app/data` 和 `docker compose --env-file .env.restore cp <backup>/uploads/. app:/app/uploads` 导入备份。
-6. 如果复制改变了所有者，执行一次性权限修复：`docker compose --env-file .env.restore run --rm --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE --entrypoint chown app -R 10001:10001 /app/data /app/uploads`。
-7. 执行 `docker compose --env-file .env.restore run --rm app node server/db/migrate.js`，再执行 `docker compose --env-file .env.restore up -d`。
-8. 检查 `/ready`，并用最小冒烟测试验证用户数、课程、预约、作业、附件下载与实时教室。确认恢复点可用后，再将受管理的生产配置切换到这两个新卷。
-
-复制回已有卷会改变生产数据。每次操作前都要记录完整卷名、备份标识和操作人，并采用双人复核。
-
-## 9. 外部适配器与密钥
-
-| 变量                        | 用途           | 运维要求                                                |
-| --------------------------- | -------------- | ------------------------------------------------------- |
-| `VERIFICATION_CODE_SECRET`  | 验证码 HMAC    | 高熵、稳定保存；轮换会使待使用验证码失效                |
-| `SMTP_URL` / `MAIL_FROM`    | 注册邮件       | 生产注册必需；URL 内密码应正确百分号编码                |
-| `AI_API_URL` / `AI_API_KEY` | 服务端 AI 对话 | 只允许 HTTPS 且可信的供应商；确认数据保留条款           |
-| `TURN_URL` / 用户名 / 凭据  | WebRTC 中继    | TURN 凭据会发给授权教室客户端，应限权、轮换并监控流量   |
-| `UPLOAD_*` 配额与并发       | 上传资源边界   | 按持久卷容量设置平台/用户上限；监控 503、507 与剩余空间 |
-
-外部 AI 未配置时，核心教学工作流仍可运行；TURN 未配置时，直连 WebRTC 可能在严格 NAT 或企业网络中失败。SMTP 未配置时，生产环境不会回传开发验证码，新用户注册将不可用。
-
-## 10. 监控与事故处理
-
-至少监控以下信号：
-
-- `/ready` 成功率和延迟；
-- 容器重启次数、CPU、内存和文件句柄；
-- 数据卷剩余空间、SQLite 文件与 WAL 增长；
-- HTTP 5xx/429、邮件发送失败、AI 适配器失败和 WebSocket 异常断开；
-- 备份完成时间、大小、校验和与恢复演练结果。
-
-Compose 已将容器 JSON 日志轮转限制为 3 个、每个 10 MB。数据卷不在该限制内，需要单独监控。故障时先保全日志和数据副本，再执行修复；涉及漏洞或凭据泄露时，按根目录 [SECURITY.md](../SECURITY.md) 进行私密报告和协调披露。
+- 单 Railway 后端实例，没有 Redis 房间广播。
+- 没有 TURN；严格 NAT 下音视频可能失败。
+- 没有支付、正式入学、课程录像或外部付费 AI。
+- 多实例和高可用不在本轮范围内。
+- Railway Hobby 不能直接发送 SMTP；注册邮件依赖 Vercel HTTPS 中继及 Gmail 可用性。

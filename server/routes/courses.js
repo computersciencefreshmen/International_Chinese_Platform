@@ -179,8 +179,10 @@ function optionalAuthentication(app) {
   }
 }
 
-function findCourse(db, courseId) {
-  return db.prepare(`${courseSelect} WHERE c.id = ? LIMIT 1`).get(courseId)
+async function findCourse(db, courseId) {
+  return await db
+    .prepare(`${courseSelect} WHERE c.id = ? LIMIT 1`)
+    .get(courseId)
 }
 
 function canReadUnpublishedCourse(request, course) {
@@ -251,18 +253,21 @@ export async function courseRoutes(app) {
       }
 
       const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
-      const total = db
-        .prepare(
-          `SELECT COUNT(*) AS count
+      const total = (
+        await db
+          .prepare(
+            `SELECT COUNT(*) AS count
           FROM courses AS c
           INNER JOIN users AS u ON u.id = c.teacher_id
           LEFT JOIN teacher_profiles AS tp ON tp.user_id = c.teacher_id
           ${whereClause}`
-        )
-        .get(...parameters).count
-      const items = db
-        .prepare(
-          `${courseSelect}
+          )
+          .get(...parameters)
+      ).count
+      const items = (
+        await db
+          .prepare(
+            `${courseSelect}
           ${whereClause}
           ORDER BY
             CASE c.status
@@ -275,9 +280,9 @@ export async function courseRoutes(app) {
             COALESCE(c.published_at, c.updated_at) DESC,
             c.id DESC
           LIMIT ? OFFSET ?`
-        )
-        .all(...parameters, pageSize, (page - 1) * pageSize)
-        .map(courseFromRow)
+          )
+          .all(...parameters, pageSize, (page - 1) * pageSize)
+      ).map(courseFromRow)
 
       return responseData(reply, {
         items,
@@ -295,7 +300,7 @@ export async function courseRoutes(app) {
         return validationError(reply, paramsResult)
       }
 
-      const course = findCourse(db, paramsResult.data.id)
+      const course = await findCourse(db, paramsResult.data.id)
       if (!course) {
         return responseError(reply, 404, '课程不存在')
       }
@@ -313,7 +318,7 @@ export async function courseRoutes(app) {
 
       const data = courseFromRow(course)
       if (canReadUnpublishedCourse(request, course)) {
-        const latestReview = db
+        const latestReview = await db
           .prepare(
             `SELECT * FROM course_reviews
             WHERE course_id = ?
@@ -340,31 +345,33 @@ export async function courseRoutes(app) {
       const input = result.data
       const id = randomUUID()
       const now = new Date().toISOString()
-      db.prepare(
-        `INSERT INTO courses (
+      await db
+        .prepare(
+          `INSERT INTO courses (
           id, teacher_id, title, summary, description, level, category,
           cover_url, duration_minutes, price_cents, capacity, status,
           created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
-      ).run(
-        id,
-        request.auth.user.id,
-        input.title,
-        input.summary,
-        input.description,
-        input.level,
-        input.category,
-        input.coverUrl ?? null,
-        input.durationMinutes,
-        input.priceCents,
-        input.capacity,
-        now,
-        now
-      )
+        )
+        .run(
+          id,
+          request.auth.user.id,
+          input.title,
+          input.summary,
+          input.description,
+          input.level,
+          input.category,
+          input.coverUrl ?? null,
+          input.durationMinutes,
+          input.priceCents,
+          input.capacity,
+          now,
+          now
+        )
 
       return responseData(
         reply,
-        courseFromRow(findCourse(db, id)),
+        courseFromRow(await findCourse(db, id)),
         '课程草稿已创建',
         201
       )
@@ -385,7 +392,7 @@ export async function courseRoutes(app) {
         return validationError(reply, result)
       }
 
-      const course = findCourse(db, paramsResult.data.id)
+      const course = await findCourse(db, paramsResult.data.id)
       if (!course) {
         return responseError(reply, 404, '课程不存在')
       }
@@ -422,13 +429,13 @@ export async function courseRoutes(app) {
 
       assignments.push('updated_at = ?')
       values.push(new Date().toISOString(), course.id)
-      db.prepare(
-        `UPDATE courses SET ${assignments.join(', ')} WHERE id = ?`
-      ).run(...values)
+      await db
+        .prepare(`UPDATE courses SET ${assignments.join(', ')} WHERE id = ?`)
+        .run(...values)
 
       return responseData(
         reply,
-        courseFromRow(findCourse(db, course.id)),
+        courseFromRow(await findCourse(db, course.id)),
         '课程已更新'
       )
     }
@@ -443,7 +450,7 @@ export async function courseRoutes(app) {
         return validationError(reply, paramsResult)
       }
 
-      const course = findCourse(db, paramsResult.data.id)
+      const course = await findCourse(db, paramsResult.data.id)
       if (!course) {
         return responseError(reply, 404, '课程不存在')
       }
@@ -457,7 +464,7 @@ export async function courseRoutes(app) {
         })
       }
 
-      const verifiedTeacher = db
+      const verifiedTeacher = await db
         .prepare(
           `SELECT 1
            FROM teacher_profiles
@@ -478,8 +485,8 @@ export async function courseRoutes(app) {
 
       const submittedAt = new Date().toISOString()
       const auditId = randomUUID()
-      const notifyAdministrators = db.transaction(() => {
-        const updated = db
+      const notifyAdministrators = db.transaction(async () => {
+        const updated = await db
           .prepare(
             `UPDATE courses
             SET status = 'pending', rejection_reason = NULL, updated_at = ?
@@ -491,26 +498,28 @@ export async function courseRoutes(app) {
           throw new Error('COURSE_STATE_CHANGED')
         }
 
-        db.prepare(
-          `INSERT INTO audit_logs (
+        await db
+          .prepare(
+            `INSERT INTO audit_logs (
             id, actor_id, action, entity_type, entity_id, details_json,
             request_id, ip_address, user_agent, created_at
           ) VALUES (?, ?, 'course.submitted', 'course', ?, ?, ?, ?, ?, ?)`
-        ).run(
-          auditId,
-          request.auth.user.id,
-          course.id,
-          JSON.stringify({
-            previousStatus: course.status,
-            nextStatus: 'pending'
-          }),
-          request.id ?? null,
-          request.ip ?? null,
-          request.headers['user-agent'] ?? null,
-          submittedAt
-        )
+          )
+          .run(
+            auditId,
+            request.auth.user.id,
+            course.id,
+            JSON.stringify({
+              previousStatus: course.status,
+              nextStatus: 'pending'
+            }),
+            request.id ?? null,
+            request.ip ?? null,
+            request.headers['user-agent'] ?? null,
+            submittedAt
+          )
 
-        const administrators = db
+        const administrators = await db
           .prepare(
             "SELECT id FROM users WHERE role = 'administrator' AND status = 'active'"
           )
@@ -524,7 +533,7 @@ export async function courseRoutes(app) {
 
         for (const administrator of administrators) {
           const notificationId = randomUUID()
-          insertNotification.run(
+          await insertNotification.run(
             notificationId,
             administrator.id,
             '有新课程待审核',
@@ -538,7 +547,7 @@ export async function courseRoutes(app) {
       })
 
       try {
-        notifyAdministrators()
+        await notifyAdministrators()
       } catch (error) {
         if (error?.message === 'COURSE_STATE_CHANGED') {
           return responseError(reply, 409, '课程状态已变化，请刷新后重试')
@@ -548,7 +557,7 @@ export async function courseRoutes(app) {
 
       return responseData(
         reply,
-        courseFromRow(findCourse(db, course.id)),
+        courseFromRow(await findCourse(db, course.id)),
         '课程已提交审核'
       )
     }

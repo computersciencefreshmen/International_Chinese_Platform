@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM node:24-bookworm-slim AS build
 
 ARG PNPM_VERSION=11.9.0
@@ -18,8 +16,7 @@ RUN corepack enable \
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 COPY . .
 RUN pnpm build && pnpm prune --prod
@@ -34,14 +31,22 @@ LABEL org.opencontainers.image.title="International Chinese Platform" \
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=7777 \
-    DATABASE_PATH=/app/data/platform.db \
-    UPLOAD_DIR=/app/uploads \
     DIST_DIR=/app/dist \
     SEED_ON_START=false
 
-RUN groupadd --system --gid 10001 platform \
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl --fail --silent --show-error \
+      --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends postgresql-client-18 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 platform \
     && useradd --system --uid 10001 --gid platform --home-dir /app --shell /usr/sbin/nologin platform \
-    && mkdir -p /app/data /app/uploads \
+    && mkdir -p /app \
     && chown -R platform:platform /app
 
 WORKDIR /app
@@ -54,7 +59,6 @@ COPY --from=build --chown=platform:platform /app/dist ./dist
 USER 10001:10001
 
 EXPOSE 7777
-VOLUME ["/app/data", "/app/uploads"]
 STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

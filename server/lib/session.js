@@ -36,12 +36,14 @@ export function publicUser(user) {
     chineseLevel: user.chinese_level ?? user.chineseLevel ?? null,
     bio: user.bio ?? '',
     status: user.status,
+    mustResetPassword:
+      user.must_reset_password ?? user.mustResetPassword ?? false,
     createdAt: user.created_at ?? user.createdAt,
     updatedAt: user.updated_at ?? user.updatedAt
   }
 }
 
-export function createSession(
+export async function createSession(
   db,
   userId,
   {
@@ -71,8 +73,9 @@ export function createSession(
   const createdAt = nowIso()
   const expiresAt = new Date(Date.now() + boundedTtl * 1000).toISOString()
 
-  db.prepare(
-    `INSERT INTO sessions (
+  await db
+    .prepare(
+      `INSERT INTO sessions (
       id,
       user_id,
       token_hash,
@@ -82,16 +85,17 @@ export function createSession(
       user_agent,
       ip_address
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    userId,
-    tokenHash,
-    expiresAt,
-    createdAt,
-    createdAt,
-    userAgent?.slice(0, 512) ?? null,
-    ipAddress?.slice(0, 64) ?? null
-  )
+    )
+    .run(
+      id,
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt,
+      createdAt,
+      userAgent?.slice(0, 512) ?? null,
+      ipAddress?.slice(0, 64) ?? null
+    )
 
   return {
     id,
@@ -102,14 +106,14 @@ export function createSession(
   }
 }
 
-export function findSessionByToken(db, token, { touch = true } = {}) {
+export async function findSessionByToken(db, token, { touch = true } = {}) {
   const tokenHash = hashSessionToken(token)
   if (!tokenHash) {
     return null
   }
 
   const currentTime = nowIso()
-  const row = db
+  const row = await db
     .prepare(
       `SELECT
         s.id AS session_id,
@@ -127,6 +131,7 @@ export function findSessionByToken(db, token, { touch = true } = {}) {
         u.chinese_level,
         u.bio,
         u.status,
+        u.must_reset_password,
         u.created_at,
         u.updated_at
       FROM sessions AS s
@@ -144,10 +149,9 @@ export function findSessionByToken(db, token, { touch = true } = {}) {
   }
 
   if (touch) {
-    db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').run(
-      currentTime,
-      row.session_id
-    )
+    await db
+      .prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?')
+      .run(currentTime, row.session_id)
   }
 
   return {
@@ -158,12 +162,12 @@ export function findSessionByToken(db, token, { touch = true } = {}) {
   }
 }
 
-export function revokeSession(db, sessionId) {
+export async function revokeSession(db, sessionId) {
   if (!sessionId) {
     return false
   }
 
-  const result = db
+  const result = await db
     .prepare(
       `UPDATE sessions
       SET revoked_at = ?
@@ -174,13 +178,13 @@ export function revokeSession(db, sessionId) {
   return result.changes > 0
 }
 
-export function revokeSessionByToken(db, token) {
+export async function revokeSessionByToken(db, token) {
   const tokenHash = hashSessionToken(token)
   if (!tokenHash) {
     return false
   }
 
-  const result = db
+  const result = await db
     .prepare(
       `UPDATE sessions
       SET revoked_at = ?
@@ -191,7 +195,7 @@ export function revokeSessionByToken(db, token) {
   return result.changes > 0
 }
 
-export function revokeUserSessions(
+export async function revokeUserSessions(
   db,
   userId,
   { exceptSessionId = null } = {}
@@ -199,22 +203,26 @@ export function revokeUserSessions(
   const revokedAt = nowIso()
 
   if (exceptSessionId) {
-    return db
-      .prepare(
-        `UPDATE sessions
+    return (
+      await db
+        .prepare(
+          `UPDATE sessions
         SET revoked_at = ?
         WHERE user_id = ? AND id <> ? AND revoked_at IS NULL`
-      )
-      .run(revokedAt, userId, exceptSessionId).changes
+        )
+        .run(revokedAt, userId, exceptSessionId)
+    ).changes
   }
 
-  return db
-    .prepare(
-      `UPDATE sessions
+  return (
+    await db
+      .prepare(
+        `UPDATE sessions
       SET revoked_at = ?
       WHERE user_id = ? AND revoked_at IS NULL`
-    )
-    .run(revokedAt, userId).changes
+      )
+      .run(revokedAt, userId)
+  ).changes
 }
 
 export function extractSessionToken(request, { allowBearer = true } = {}) {

@@ -1,375 +1,320 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
-import { randomUUID } from 'node:crypto'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { createHash, randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import cookie from '@fastify/cookie'
-import multipart from '@fastify/multipart'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
-import { hashPassword } from '../lib/password.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import fileRoutes from '../routes/files.js'
-import { loadConfig } from '../config.js'
+import { createTestDatabase } from './support/database.js'
 
-function authorization(token) {
-  return { authorization: `Bearer ${token}` }
+const PNG = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44,
+  0x52, 1, 2, 3, 4
+])
+const PDF = Buffer.from('%PDF-1.7\nexample')
+
+function objectEtag(body) {
+  return `"${createHash('sha256').update(body).digest('hex')}"`
 }
 
-function multipartBody({ content, filename, mimeType }) {
-  const boundary = `test-${randomUUID()}`
-  const prefix = Buffer.from(
-    `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
-      `Content-Type: ${mimeType}\r\n\r\n`
-  )
-  const suffix = Buffer.from(`\r\n--${boundary}--\r\n`)
+function createFakeStorage() {
+  const objects = new Map()
+  const promotions = []
+  let readCalls = 0
   return {
-    body: Buffer.concat([prefix, content, suffix]),
-    contentType: `multipart/form-data; boundary=${boundary}`
+    objects,
+    promotions,
+    get readCalls() {
+      return readCalls
+    },
+    async probe() {
+      return 'up'
+    },
+    async createUploadUrl({ key }) {
+      return `https://objects.test/${encodeURIComponent(key)}`
+    },
+    putFromUrl(url, body) {
+      const key = decodeURIComponent(new URL(url).pathname.slice(1))
+      objects.set(key, Buffer.from(body))
+      return key
+    },
+    async read(key) {
+      readCalls += 1
+      const body = objects.get(key)
+      if (!body)
+        throw Object.assign(new Error('missing'), { name: 'NoSuchKey' })
+      return {
+        ETag: objectEtag(body),
+        Body: (async function* () {
+          yield body
+        })()
+      }
+    },
+    async copy({ sourceKey, destinationKey, sourceEtag }) {
+      const body = objects.get(sourceKey)
+      if (!body)
+        throw Object.assign(new Error('missing'), { name: 'NoSuchKey' })
+      if (objectEtag(body) !== sourceEtag) {
+        throw Object.assign(new Error('changed'), {
+          name: 'PreconditionFailed',
+          $metadata: { httpStatusCode: 412 }
+        })
+      }
+      objects.set(destinationKey, Buffer.from(body))
+      promotions.push({ sourceKey, destinationKey })
+    },
+    async createDownloadUrl({ key }) {
+      if (!objects.has(key))
+        throw Object.assign(new Error('missing'), { name: 'NoSuchKey' })
+      return `https://objects.test/download/${encodeURIComponent(key)}`
+    },
+    async delete(key) {
+      objects.delete(key)
+    }
   }
 }
 
-function pngContent(sizeBytes = 48) {
-  const header = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-    0x49, 0x48, 0x44, 0x52
-  ])
-  assert.ok(sizeBytes >= header.length)
-  return Buffer.concat([header, Buffer.alloc(sizeBytes - header.length, 0x61)])
+async function addUser(database, role) {
+  const id = randomUUID()
+  await database
+    .prepare(
+      `INSERT INTO users (
+         id, email, password_hash, role, display_name
+       ) VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(id, `${id}@example.com`, 'x'.repeat(64), role, role)
+  const session = await createSession(database, id, { ttlSeconds: 3600 })
+  return { id, headers: { cookie: `icp_session=${session.token}` } }
 }
 
-async function createTestApp(t, uploadConfig = {}) {
-  const uploadDir = await mkdtemp(join(tmpdir(), 'chinese-platform-files-'))
-  const db = createDatabase({ filename: ':memory:' })
+async function createTestApp(t, limits = {}) {
+  const db = await createTestDatabase()
+  const storage = createFakeStorage()
   const app = Fastify({ logger: false })
   app.decorate('db', db)
+  app.decorate('objectStorage', storage)
   app.decorate('config', {
-    uploadDir,
     uploadOwnerQuotaBytes: 250 * 1024 * 1024,
     uploadTotalQuotaBytes: 5 * 1024 * 1024 * 1024,
     uploadMaxConcurrent: 4,
-    ...uploadConfig
+    ...limits
   })
-
   await app.register(cookie)
-  await app.register(multipart, {
-    limits: { files: 1, fileSize: 50 * 1024 * 1024, fields: 10 }
-  })
-  await authPlugin(app, {
-    db,
-    allowBearer: true,
-    secureCookies: false,
-    sessionTtlSeconds: 3600
-  })
+  await authPlugin(app, { db, secureCookies: false, sessionTtlSeconds: 3600 })
   await app.register(fileRoutes)
-
-  const now = new Date().toISOString()
-  const passwordHash = await hashPassword('FileTest123!')
-  const users = {}
-  for (const [name, role] of [
-    ['owner', 'teacher'],
-    ['other', 'teacher'],
-    ['student', 'student']
-  ]) {
-    const id = randomUUID()
-    db.prepare(
-      `INSERT INTO users (
-        id, email, password_hash, role, display_name, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
-    ).run(id, `${name}@file.test`, passwordHash, role, name, now, now)
-    users[name] = {
-      id,
-      token: createSession(db, id, { ttlSeconds: 3600 }).token
-    }
-  }
-
   await app.ready()
   t.after(async () => {
     await app.close()
-    db.close()
-    await rm(uploadDir, { recursive: true, force: true })
+    await db.close()
   })
+  return { app, db, storage }
+}
 
-  return { app, db, uploadDir, users }
+async function createIntent(app, user, input = {}) {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/files/upload-intents',
+    headers: user.headers,
+    payload: {
+      category: 'avatar',
+      originalName: 'avatar.png',
+      mimeType: 'image/png',
+      sizeBytes: PNG.length,
+      ...input
+    }
+  })
+  return { response, body: response.json() }
 }
 
 test('validated image upload is public while metadata and deletion remain owned', async (t) => {
-  const { app, db, users } = await createTestApp(t)
-  const png = pngContent()
-  const form = multipartBody({
-    content: png,
-    filename: '课程封面.png',
-    mimeType: 'image/png'
-  })
+  const { app, storage } = await createTestApp(t)
+  const owner = await addUser(app.db, 'student')
+  const outsider = await addUser(app.db, 'student')
+  const intent = await createIntent(app, owner)
+  assert.equal(intent.response.statusCode, 201)
+  storage.putFromUrl(intent.body.data.uploadUrl, PNG)
 
-  const upload = await app.inject({
+  const completed = await app.inject({
     method: 'POST',
-    url: '/api/v1/files?category=course_cover',
-    headers: {
-      ...authorization(users.owner.token),
-      'content-type': form.contentType
-    },
-    payload: form.body
+    url: `/api/v1/files/upload-intents/${intent.body.data.id}/complete`,
+    headers: owner.headers
   })
-  assert.equal(upload.statusCode, 201)
+  assert.equal(completed.statusCode, 201)
+  const file = completed.json().data
 
-  assert.equal(upload.json().data.mimeType, 'image/png')
-  assert.equal(upload.json().data.ownerId, users.owner.id)
-  assert.equal(upload.json().data.sha256.length, 64)
-  const fileId = upload.json().data.id
-
-  const content = await app.inject({
+  const content = await app.inject({ method: 'GET', url: file.url })
+  assert.equal(content.statusCode, 302)
+  assert.match(content.headers.location, /^https:\/\/objects\.test\/download\//)
+  const forbidden = await app.inject({
     method: 'GET',
-    url: `/api/v1/files/${fileId}/content`
+    url: `/api/v1/files/${file.id}`,
+    headers: outsider.headers
   })
-  assert.equal(content.statusCode, 200)
-  assert.equal(content.headers['content-type'], 'image/png')
-  assert.deepEqual(content.rawPayload, png)
-
-  const otherMetadata = await app.inject({
-    method: 'GET',
-    url: `/api/v1/files/${fileId}`,
-    headers: authorization(users.other.token)
-  })
-  assert.equal(otherMetadata.statusCode, 403)
-
-  const otherDelete = await app.inject({
+  assert.equal(forbidden.statusCode, 403)
+  const removed = await app.inject({
     method: 'DELETE',
-    url: `/api/v1/files/${fileId}`,
-    headers: authorization(users.other.token)
+    url: `/api/v1/files/${file.id}`,
+    headers: owner.headers
   })
-  assert.equal(otherDelete.statusCode, 403)
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM files').get().count, 1)
-
-  const ownerDelete = await app.inject({
-    method: 'DELETE',
-    url: `/api/v1/files/${fileId}`,
-    headers: authorization(users.owner.token)
-  })
-  assert.equal(ownerDelete.statusCode, 200)
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM files').get().count, 0)
+  assert.equal(removed.statusCode, 200)
+  assert.equal(storage.objects.has(storage.promotions[0].destinationKey), false)
 })
 
 test('magic-byte validation rejects disguised files and protects private material', async (t) => {
-  const { app, db, uploadDir, users } = await createTestApp(t)
-  const disguised = multipartBody({
-    content: Buffer.from('%PDF-1.7 disguised as an image'),
-    filename: 'avatar.png',
-    mimeType: 'image/png'
-  })
-  const invalid = await app.inject({
+  const { app, storage } = await createTestApp(t)
+  const teacher = await addUser(app.db, 'teacher')
+  const student = await addUser(app.db, 'student')
+  const disguised = await createIntent(app, teacher)
+  storage.putFromUrl(disguised.body.data.uploadUrl, Buffer.alloc(PNG.length, 1))
+  const rejected = await app.inject({
     method: 'POST',
-    url: '/api/v1/files?category=avatar',
-    headers: {
-      ...authorization(users.owner.token),
-      'content-type': disguised.contentType
-    },
-    payload: disguised.body
+    url: `/api/v1/files/upload-intents/${disguised.body.data.id}/complete`,
+    headers: teacher.headers
   })
-  assert.equal(invalid.statusCode, 415)
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM files').get().count, 0)
-  assert.deepEqual(await readdir(join(uploadDir, '.tmp')), [])
+  assert.equal(rejected.statusCode, 415)
 
-  const signatureOnly = multipartBody({
-    content: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    filename: 'truncated.png',
-    mimeType: 'image/png'
+  const material = await createIntent(app, teacher, {
+    category: 'course_material',
+    originalName: 'lesson.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: PDF.length
   })
-  const truncatedHeader = await app.inject({
+  storage.putFromUrl(material.body.data.uploadUrl, PDF)
+  const completed = await app.inject({
     method: 'POST',
-    url: '/api/v1/files?category=avatar',
-    headers: {
-      ...authorization(users.owner.token),
-      'content-type': signatureOnly.contentType
-    },
-    payload: signatureOnly.body
+    url: `/api/v1/files/upload-intents/${material.body.data.id}/complete`,
+    headers: teacher.headers
   })
-  assert.equal(truncatedHeader.statusCode, 415)
-  assert.deepEqual(await readdir(join(uploadDir, '.tmp')), [])
-
-  const pdf = Buffer.from('%PDF-1.7 portfolio material')
-  const material = multipartBody({
-    content: pdf,
-    filename: 'lesson.pdf',
-    mimeType: 'application/pdf'
-  })
-  const forbiddenStudentUpload = await app.inject({
-    method: 'POST',
-    url: '/api/v1/files?category=course_material',
-    headers: {
-      ...authorization(users.student.token),
-      'content-type': material.contentType
-    },
-    payload: material.body
-  })
-  assert.equal(forbiddenStudentUpload.statusCode, 403)
-
-  const upload = await app.inject({
-    method: 'POST',
-    url: '/api/v1/files?category=course_material',
-    headers: {
-      ...authorization(users.owner.token),
-      'content-type': material.contentType
-    },
-    payload: material.body
-  })
-  assert.equal(upload.statusCode, 201)
-
-  const anonymousContent = await app.inject({
+  assert.equal(completed.statusCode, 201)
+  const denied = await app.inject({
     method: 'GET',
-    url: upload.json().data.url
+    url: completed.json().data.url,
+    headers: student.headers
   })
-  assert.equal(anonymousContent.statusCode, 401)
-
-  const authenticatedContent = await app.inject({
-    method: 'GET',
-    url: upload.json().data.url,
-    headers: authorization(users.other.token)
-  })
-  assert.equal(authenticatedContent.statusCode, 403)
-
-  const ownerContent = await app.inject({
-    method: 'GET',
-    url: upload.json().data.url,
-    headers: authorization(users.owner.token)
-  })
-  assert.equal(ownerContent.statusCode, 200)
-  assert.deepEqual(ownerContent.rawPayload, pdf)
+  assert.equal(denied.statusCode, 403)
 })
 
-test('concurrent reservations prevent account and platform quota bypass', async (t) => {
-  const ownerLimited = await createTestApp(t, {
-    uploadOwnerQuotaBytes: 70,
-    uploadTotalQuotaBytes: 200,
-    uploadMaxConcurrent: 2
+test('transactional reservations prevent account and platform quota bypass', async (t) => {
+  const { app } = await createTestApp(t, {
+    uploadOwnerQuotaBytes: PNG.length + 5,
+    uploadTotalQuotaBytes: PNG.length + 5
   })
-  const png = pngContent(48)
-  const ownerUploads = await Promise.all(
-    ['first.png', 'second.png'].map(async (filename) => {
-      const form = multipartBody({
-        content: png,
-        filename,
-        mimeType: 'image/png'
-      })
-      return ownerLimited.app.inject({
-        method: 'POST',
-        url: '/api/v1/files?category=avatar',
-        headers: {
-          ...authorization(ownerLimited.users.owner.token),
-          'content-type': form.contentType
-        },
-        payload: form.body
-      })
-    })
-  )
-
+  const owner = await addUser(app.db, 'student')
+  const results = await Promise.all([
+    createIntent(app, owner),
+    createIntent(app, owner)
+  ])
   assert.deepEqual(
-    ownerUploads.map((response) => response.statusCode).sort(),
+    results.map(({ response }) => response.statusCode).sort(),
     [201, 413]
   )
-  assert.equal(
-    ownerLimited.db.prepare('SELECT SUM(size_bytes) AS total FROM files').get()
-      .total,
-    48
-  )
-  assert.deepEqual(await readdir(join(ownerLimited.uploadDir, '.tmp')), [])
-
-  const platformLimited = await createTestApp(t, {
-    uploadOwnerQuotaBytes: 60,
-    uploadTotalQuotaBytes: 80,
-    uploadMaxConcurrent: 2
-  })
-  const platformUploads = await Promise.all(
-    [platformLimited.users.owner, platformLimited.users.other].map(
-      async (user, index) => {
-        const form = multipartBody({
-          content: png,
-          filename: `platform-${index}.png`,
-          mimeType: 'image/png'
-        })
-        return platformLimited.app.inject({
-          method: 'POST',
-          url: '/api/v1/files?category=avatar',
-          headers: {
-            ...authorization(user.token),
-            'content-type': form.contentType
-          },
-          payload: form.body
-        })
-      }
-    )
-  )
-
-  assert.deepEqual(
-    platformUploads.map((response) => response.statusCode).sort(),
-    [201, 507]
-  )
-  assert.equal(
-    platformLimited.db
-      .prepare('SELECT SUM(size_bytes) AS total FROM files')
-      .get().total,
-    48
-  )
-  assert.deepEqual(await readdir(join(platformLimited.uploadDir, '.tmp')), [])
 })
 
-test('the upload admission limit applies fail-fast process backpressure', async (t) => {
-  const { app, db, uploadDir, users } = await createTestApp(t, {
-    uploadOwnerQuotaBytes: 3 * 1024 * 1024,
-    uploadTotalQuotaBytes: 6 * 1024 * 1024,
-    uploadMaxConcurrent: 1
+test('the per-account upload admission limit is fail-fast and released by cancellation', async (t) => {
+  const { app } = await createTestApp(t, { uploadMaxConcurrent: 1 })
+  const owner = await addUser(app.db, 'student')
+  const first = await createIntent(app, owner)
+  assert.equal(first.response.statusCode, 201)
+  const blocked = await createIntent(app, owner)
+  assert.equal(blocked.response.statusCode, 429)
+  const cancelled = await app.inject({
+    method: 'DELETE',
+    url: `/api/v1/files/upload-intents/${first.body.data.id}`,
+    headers: owner.headers
   })
-  const png = pngContent(1024 * 1024)
-  const responses = await Promise.all(
-    ['one.png', 'two.png'].map(async (filename) => {
-      const form = multipartBody({
-        content: png,
-        filename,
-        mimeType: 'image/png'
-      })
-      return app.inject({
-        method: 'POST',
-        url: '/api/v1/files?category=avatar',
-        headers: {
-          ...authorization(users.owner.token),
-          'content-type': form.contentType
-        },
-        payload: form.body
-      })
-    })
-  )
-
-  assert.deepEqual(
-    responses.map((response) => response.statusCode).sort(),
-    [201, 503]
-  )
-  assert.equal(
-    responses.find((response) => response.statusCode === 503).headers[
-      'retry-after'
-    ],
-    '1'
-  )
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM files').get().count, 1)
-  assert.deepEqual(await readdir(join(uploadDir, '.tmp')), [])
+  assert.equal(cancelled.statusCode, 200)
+  assert.equal((await createIntent(app, owner)).response.statusCode, 201)
 })
 
-test('upload resource configuration rejects malformed or unsafe limits', () => {
-  assert.throws(
-    () => loadConfig({ UPLOAD_MAX_CONCURRENT: '4workers' }),
-    /UPLOAD_MAX_CONCURRENT/
+test('upload resource configuration rejects malformed or unsafe limits', async () => {
+  const app = Fastify({ logger: false })
+  app.decorate('db', {})
+  app.decorate('objectStorage', createFakeStorage())
+
+  app.decorate('config', {
+    uploadOwnerQuotaBytes: 0,
+    uploadTotalQuotaBytes: 1,
+    uploadMaxConcurrent: 99
+  })
+  await assert.rejects(async () => {
+    await app.register(fileRoutes)
+    await app.ready()
+  }, /uploadOwnerQuotaBytes/)
+  await app.close()
+})
+
+test('a reusable presigned URL cannot overwrite the promoted file', async (t) => {
+  const { app, db, storage } = await createTestApp(t)
+  const owner = await addUser(db, 'student')
+  const intent = await createIntent(app, owner)
+  const temporaryKey = storage.putFromUrl(intent.body.data.uploadUrl, PNG)
+
+  const completed = await app.inject({
+    method: 'POST',
+    url: `/api/v1/files/upload-intents/${intent.body.data.id}/complete`,
+    headers: owner.headers
+  })
+  assert.equal(completed.statusCode, 201)
+  const file = completed.json().data
+  const row = await db.prepare('SELECT * FROM files WHERE id = ?').get(file.id)
+  assert.match(row.storage_key, /^files\//)
+  assert.notEqual(row.storage_key, temporaryKey)
+  assert.deepEqual(storage.objects.get(row.storage_key), PNG)
+
+  storage.putFromUrl(intent.body.data.uploadUrl, Buffer.alloc(PNG.length, 1))
+  assert.deepEqual(storage.objects.get(row.storage_key), PNG)
+})
+
+test('source changes during validation fail the conditional promotion', async (t) => {
+  const { app, db, storage } = await createTestApp(t)
+  const owner = await addUser(db, 'student')
+  const intent = await createIntent(app, owner)
+  storage.putFromUrl(intent.body.data.uploadUrl, PNG)
+  const copy = storage.copy.bind(storage)
+  storage.copy = async (input) => {
+    storage.objects.set(input.sourceKey, Buffer.alloc(PNG.length, 1))
+    return copy(input)
+  }
+
+  const completed = await app.inject({
+    method: 'POST',
+    url: `/api/v1/files/upload-intents/${intent.body.data.id}/complete`,
+    headers: owner.headers
+  })
+  assert.equal(completed.statusCode, 409)
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT status FROM upload_intents WHERE id = ?')
+        .get(intent.body.data.id)
+    ).status,
+    'cancelled'
   )
-  assert.throws(
-    () =>
-      loadConfig({
-        UPLOAD_OWNER_QUOTA_BYTES: '1024',
-        UPLOAD_TOTAL_QUOTA_BYTES: '512'
-      }),
-    /UPLOAD_TOTAL_QUOTA_BYTES/
+  assert.equal(
+    (await db.prepare('SELECT COUNT(*) AS count FROM files').get()).count,
+    0
   )
+})
+
+test('concurrent completion claims inspect an intent only once', async (t) => {
+  const { app, db, storage } = await createTestApp(t)
+  const owner = await addUser(db, 'student')
+  const intent = await createIntent(app, owner)
+  storage.putFromUrl(intent.body.data.uploadUrl, PNG)
+  const url = `/api/v1/files/upload-intents/${intent.body.data.id}/complete`
+
+  const responses = await Promise.all([
+    app.inject({ method: 'POST', url, headers: owner.headers }),
+    app.inject({ method: 'POST', url, headers: owner.headers })
+  ])
+  const statusCodes = responses.map((response) => response.statusCode)
+  assert.equal(statusCodes.filter((statusCode) => statusCode === 201).length, 1)
+  assert.ok(
+    statusCodes.every((statusCode) => [200, 201, 409].includes(statusCode))
+  )
+  assert.equal(storage.readCalls, 1)
 })

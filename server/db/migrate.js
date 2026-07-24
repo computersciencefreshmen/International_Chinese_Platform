@@ -1,10 +1,10 @@
-import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import process from 'node:process'
+import { pathToFileURL } from 'node:url'
 
 import {
   createDatabase,
-  DEFAULT_DATABASE_FILE,
+  DEFAULT_DATABASE_URL,
   migrateDatabase
 } from './database.js'
 
@@ -18,8 +18,8 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  const filename = process.argv[2] || DEFAULT_DATABASE_FILE
-  const database = createDatabase({ filename })
-  database.close()
-  process.stdout.write(`Database migration complete: ${filename}\n`)
+  const connectionString = process.env.DATABASE_URL || DEFAULT_DATABASE_URL
+  const database = await createDatabase({ connectionString })
+  await database.close()
+  process.stdout.write('PostgreSQL migration complete\n')
 }

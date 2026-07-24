@@ -5,7 +5,7 @@ import test from 'node:test'
 import cookie from '@fastify/cookie'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { hashPassword } from '../lib/password.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
@@ -16,7 +16,7 @@ function authorization(token) {
 }
 
 async function createTestApp(t) {
-  const db = createDatabase({ filename: ':memory:' })
+  const db = await createTestDatabase()
   const app = Fastify({ logger: false })
   app.decorate('db', db)
   app.decorate('config', { aiApiUrl: '', aiApiKey: '' })
@@ -39,21 +39,23 @@ async function createTestApp(t) {
     ['teacher', 'teacher']
   ]) {
     const id = randomUUID()
-    db.prepare(
-      `INSERT INTO users (
+    await db
+      .prepare(
+        `INSERT INTO users (
         id, email, password_hash, role, display_name, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
-    ).run(id, `${name}@dialogue.test`, passwordHash, role, name, now, now)
+      )
+      .run(id, `${name}@dialogue.test`, passwordHash, role, name, now, now)
     users[name] = {
       id,
-      token: createSession(db, id, { ttlSeconds: 3600 }).token
+      token: (await createSession(db, id, { ttlSeconds: 3600 })).token
     }
   }
 
   await app.ready()
   t.after(async () => {
     await app.close()
-    db.close()
+    await db.close()
   })
   return { app, db, users }
 }
@@ -107,11 +109,13 @@ test('student can generate, continue and revisit a persistent local dialogue', a
   assert.equal(list.json().data.items.length, 1)
   assert.equal(list.json().data.items[0].turnCount, 4)
   assert.equal(
-    db
-      .prepare(
-        'SELECT COUNT(*) AS count FROM dialogue_turns WHERE session_id = ?'
-      )
-      .get(dialogueId).count,
+    (
+      await db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM dialogue_turns WHERE session_id = ?'
+        )
+        .get(dialogueId)
+    ).count,
     4
   )
 })

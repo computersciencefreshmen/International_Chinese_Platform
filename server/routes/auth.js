@@ -142,9 +142,21 @@ export async function authRoutes(app) {
   const verificationSecret =
     app.config?.verificationCodeSecret || 'local-development-only-secret'
   const mailProvider = createMailProvider({
+    mailRelayUrl: app.config?.mailRelayUrl,
+    mailRelaySecret: app.config?.mailRelaySecret,
     smtpUrl: app.config?.smtpUrl,
+    smtpHost: app.config?.smtpHost,
+    smtpPort: app.config?.smtpPort,
+    smtpSecure: app.config?.smtpSecure,
+    smtpUser: app.config?.smtpUser,
+    smtpPass: app.config?.smtpPass,
     mailFrom: app.config?.mailFrom
   })
+  const mailConfigured = Boolean(
+    (app.config?.mailRelayUrl && app.config?.mailRelaySecret) ||
+    app.config?.smtpUrl ||
+    (app.config?.smtpHost && app.config?.smtpUser && app.config?.smtpPass)
+  )
 
   app.post(
     '/api/v1/auth/verification-code',
@@ -166,13 +178,13 @@ export async function authRoutes(app) {
 
       if (
         isProduction &&
-        (!app.config?.verificationCodeSecret || !app.config?.smtpUrl)
+        (!app.config?.verificationCodeSecret || !mailConfigured)
       ) {
         return responseError(reply, 503, '注册邮件服务尚未配置')
       }
 
       const { email } = result.data
-      const existingUser = db
+      const existingUser = await db
         .prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE LIMIT 1')
         .get(email)
       if (existingUser) {
@@ -184,36 +196,42 @@ export async function authRoutes(app) {
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
       const id = randomUUID()
 
-      const replaceCode = db.transaction(() => {
-        db.prepare(
-          `UPDATE verification_codes
+      const replaceCode = db.transaction(async () => {
+        await db
+          .prepare(
+            `UPDATE verification_codes
           SET consumed_at = ?
           WHERE email = ? COLLATE NOCASE
             AND purpose = 'register'
             AND consumed_at IS NULL`
-        ).run(now, email)
-        db.prepare(
-          `INSERT INTO verification_codes (
+          )
+          .run(now, email)
+        await db
+          .prepare(
+            `INSERT INTO verification_codes (
             id, email, purpose, code_hash, expires_at, created_at
           ) VALUES (?, ?, 'register', ?, ?, ?)`
-        ).run(
-          id,
-          email,
-          verificationDigest(verificationSecret, email, code),
-          expiresAt,
-          now
-        )
+          )
+          .run(
+            id,
+            email,
+            verificationDigest(verificationSecret, email, code),
+            expiresAt,
+            now
+          )
       })
-      replaceCode()
+      await replaceCode()
 
       if (isProduction) {
         try {
           await mailProvider.sendVerificationCode({ email, code, expiresAt })
         } catch (error) {
-          db.prepare(
-            `UPDATE verification_codes
+          await db
+            .prepare(
+              `UPDATE verification_codes
              SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`
-          ).run(new Date().toISOString(), id)
+            )
+            .run(new Date().toISOString(), id)
           request.log.error(
             { err: error },
             'Registration verification email delivery failed'
@@ -254,7 +272,7 @@ export async function authRoutes(app) {
       }
 
       const input = result.data
-      const existingUser = db
+      const existingUser = await db
         .prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE LIMIT 1')
         .get(input.email)
 
@@ -262,7 +280,7 @@ export async function authRoutes(app) {
         return responseError(reply, 409, '该邮箱已注册')
       }
 
-      const verification = db
+      const verification = await db
         .prepare(
           `SELECT id, code_hash, expires_at, attempts
           FROM verification_codes
@@ -286,11 +304,13 @@ export async function authRoutes(app) {
 
       if (!verificationValid) {
         if (verification) {
-          db.prepare(
-            `UPDATE verification_codes
-            SET attempts = MIN(attempts + 1, 10)
+          await db
+            .prepare(
+              `UPDATE verification_codes
+            SET attempts = LEAST(attempts + 1, 10)
             WHERE id = ?`
-          ).run(verification.id)
+            )
+            .run(verification.id)
         }
         return responseError(reply, 400, '验证码无效或已过期')
       }
@@ -301,9 +321,10 @@ export async function authRoutes(app) {
       let session
 
       try {
-        const createUserAndSession = db.transaction(() => {
-          db.prepare(
-            `INSERT INTO users (
+        const createUserAndSession = db.transaction(async () => {
+          await db
+            .prepare(
+              `INSERT INTO users (
               id,
               email,
               password_hash,
@@ -319,44 +340,47 @@ export async function authRoutes(app) {
               created_at,
               updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
-          ).run(
-            userId,
-            input.email,
-            passwordHash,
-            input.role,
-            input.displayName ?? input.email.split('@')[0],
-            input.avatarUrl ?? null,
-            input.country ?? null,
-            input.region ?? null,
-            input.age ?? null,
-            input.chineseLevel ?? null,
-            input.bio ?? '',
-            createdAt,
-            createdAt
-          )
+            )
+            .run(
+              userId,
+              input.email,
+              passwordHash,
+              input.role,
+              input.displayName ?? input.email.split('@')[0],
+              input.avatarUrl ?? null,
+              input.country ?? null,
+              input.region ?? null,
+              input.age ?? null,
+              input.chineseLevel ?? null,
+              input.bio ?? '',
+              createdAt,
+              createdAt
+            )
 
           if (input.role === 'teacher') {
-            db.prepare(
-              `INSERT INTO teacher_profiles (
+            await db
+              .prepare(
+                `INSERT INTO teacher_profiles (
                 user_id, school, title, experience_years,
                 specialties_json, certificates_json, teaching_style_json,
                 languages_json, created_at, updated_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).run(
-              userId,
-              input.school ?? '',
-              input.title ?? '国际中文教师',
-              input.experienceYears ?? 0,
-              JSON.stringify(input.specialties ?? []),
-              JSON.stringify(input.certificates ?? []),
-              JSON.stringify(input.teachingStyle ?? []),
-              JSON.stringify(input.languages ?? ['中文']),
-              createdAt,
-              createdAt
-            )
+              )
+              .run(
+                userId,
+                input.school ?? '',
+                input.title ?? '国际中文教师',
+                input.experienceYears ?? 0,
+                JSON.stringify(input.specialties ?? []),
+                JSON.stringify(input.certificates ?? []),
+                JSON.stringify(input.teachingStyle ?? []),
+                JSON.stringify(input.languages ?? ['中文']),
+                createdAt,
+                createdAt
+              )
           }
 
-          const consumeResult = db
+          const consumeResult = await db
             .prepare(
               `UPDATE verification_codes
               SET consumed_at = ?
@@ -367,18 +391,19 @@ export async function authRoutes(app) {
             throw new Error('VERIFICATION_CODE_ALREADY_USED')
           }
 
-          return createSession(db, userId, {
+          return await createSession(db, userId, {
             ttlSeconds: app.sessionTtlSeconds,
             ...sessionMetadata(request)
           })
         })
 
-        session = createUserAndSession()
+        session = await createUserAndSession()
       } catch (error) {
         if (error?.message === 'VERIFICATION_CODE_ALREADY_USED') {
           return responseError(reply, 409, '验证码已被使用，请重新获取')
         }
         if (
+          error?.code === '23505' ||
           error?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
           error?.code === 'SQLITE_CONSTRAINT'
         ) {
@@ -388,7 +413,9 @@ export async function authRoutes(app) {
         throw error
       }
 
-      const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId)
+      const user = await db
+        .prepare('SELECT * FROM users WHERE id = ?')
+        .get(userId)
       reply.setCookie(
         SESSION_COOKIE_NAME,
         session.token,
@@ -416,7 +443,7 @@ export async function authRoutes(app) {
       }
 
       const input = result.data
-      const user = db
+      const user = await db
         .prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE LIMIT 1')
         .get(input.email)
       const hashToCheck =
@@ -434,12 +461,14 @@ export async function authRoutes(app) {
 
       if (needsPasswordRehash(user.password_hash)) {
         const replacementHash = await hashPassword(input.password)
-        db.prepare(
-          'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
-        ).run(replacementHash, new Date().toISOString(), user.id)
+        await db
+          .prepare(
+            'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
+          )
+          .run(replacementHash, new Date().toISOString(), user.id)
       }
 
-      const session = createSession(db, user.id, {
+      const session = await createSession(db, user.id, {
         ttlSeconds: app.sessionTtlSeconds,
         ...sessionMetadata(request)
       })
@@ -457,7 +486,7 @@ export async function authRoutes(app) {
   app.post('/api/v1/auth/logout', async (request, reply) => {
     const credential = extractSessionToken(request)
     if (credential) {
-      revokeSessionByToken(db, credential.token)
+      await revokeSessionByToken(db, credential.token)
     }
 
     reply.clearCookie(SESSION_COOKIE_NAME, {

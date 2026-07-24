@@ -24,6 +24,7 @@ import notificationRoutes from './routes/notifications.js'
 import profileRoutes from './routes/profile.js'
 import realtimeRoutes from './routes/realtime.js'
 import teacherRoutes from './routes/teachers.js'
+import { createObjectStorage } from './services/object-storage.js'
 
 function resolveConfig(overrides = {}) {
   const nodeEnv = overrides.nodeEnv || defaultConfig.nodeEnv
@@ -60,17 +61,20 @@ function isServiceRequest(request) {
   )
 }
 
-function probeDatabase(database) {
+async function probeDatabase(database) {
   if (!database) return 'not_configured'
-  const result = database.prepare('SELECT 1 AS ok').get()
+  const result = await database.prepare('SELECT 1 AS ok').get()
   return result?.ok === 1 ? 'up' : 'down'
 }
 
 export async function buildApp({
   database = null,
+  objectStorage,
   config: configOverrides = {}
 } = {}) {
   const config = resolveConfig(configOverrides)
+  const storage =
+    objectStorage === undefined ? createObjectStorage(config) : objectStorage
   const app = Fastify({
     bodyLimit: config.bodyLimit,
     logger: config.logger,
@@ -80,6 +84,7 @@ export async function buildApp({
   app.decorate('config', config)
   app.decorate('db', database)
   app.decorate('database', database)
+  app.decorate('objectStorage', storage)
 
   await app.register(cookie)
   await app.register(helmet, {
@@ -112,7 +117,7 @@ export async function buildApp({
     await authPlugin(app, {
       db: database,
       allowBearer: config.allowBearer,
-      appOrigin: config.appOrigin,
+      appOrigins: config.appOrigins,
       secureCookies: config.secureCookies,
       sessionTtlSeconds: config.sessionTtlSeconds
     })
@@ -144,9 +149,10 @@ export async function buildApp({
 
   app.get('/api/v1/ready', async (request, reply) => {
     let databaseStatus
+    let storageStatus = storage ? 'up' : 'not_configured'
 
     try {
-      databaseStatus = probeDatabase(database)
+      databaseStatus = await probeDatabase(database)
     } catch (error) {
       databaseStatus = 'down'
       request.log.warn({ err: error }, 'Database readiness probe failed')
@@ -159,18 +165,30 @@ export async function buildApp({
         msg: 'Service is not ready',
         data: {
           status: 'not_ready',
-          checks: { database: databaseStatus }
+          checks: { database: databaseStatus, storage: storageStatus }
         }
       })
+    }
+
+    if (storage) {
+      try {
+        storageStatus = await storage.probe()
+      } catch (error) {
+        storageStatus = 'down'
+        request.log.warn(
+          { err: error },
+          'Object storage readiness probe failed'
+        )
+      }
     }
 
     return sendSuccess(
       reply,
       {
-        status: 'ready',
-        checks: { database: databaseStatus }
+        status: storageStatus === 'up' ? 'ready' : 'degraded',
+        checks: { database: databaseStatus, storage: storageStatus }
       },
-      { msg: 'ready' }
+      { msg: storageStatus === 'up' ? 'ready' : 'degraded' }
     )
   })
 

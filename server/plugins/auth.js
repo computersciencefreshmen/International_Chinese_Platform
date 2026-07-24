@@ -15,6 +15,16 @@ function sendError(reply, statusCode, message, data = null) {
   })
 }
 
+const passwordResetAllowedRequests = new Set([
+  'GET /api/v1/auth/session',
+  'PATCH /api/v1/me/password'
+])
+
+function canUseTemporaryPassword(request) {
+  const pathname = request.routeOptions?.url ?? request.url.split('?', 1)[0]
+  return passwordResetAllowedRequests.has(`${request.method} ${pathname}`)
+}
+
 export async function authPlugin(app, options = {}) {
   const db = options.db ?? app.db
   if (!db) {
@@ -24,7 +34,11 @@ export async function authPlugin(app, options = {}) {
   const allowBearer = options.allowBearer !== false
   const sessionTtlSeconds =
     Number(options.sessionTtlSeconds) || DEFAULT_SESSION_TTL_SECONDS
-  const appOrigin = options.appOrigin ?? app.config?.appOrigin ?? null
+  const appOrigins = new Set(
+    options.appOrigins ??
+      app.config?.appOrigins ??
+      [app.config?.appOrigin].filter(Boolean)
+  )
   const secureCookies =
     options.secureCookies ?? process.env.NODE_ENV === 'production'
 
@@ -39,7 +53,7 @@ export async function authPlugin(app, options = {}) {
 
     const hasSessionCookie = Boolean(request.cookies?.[SESSION_COOKIE_NAME])
     const origin = request.headers.origin
-    if (hasSessionCookie && origin && appOrigin && origin !== appOrigin) {
+    if (hasSessionCookie && origin && !appOrigins.has(origin)) {
       return sendError(reply, 403, '请求来源不受信任')
     }
   })
@@ -50,7 +64,7 @@ export async function authPlugin(app, options = {}) {
       return sendError(reply, 401, '请先登录')
     }
 
-    const session = findSessionByToken(db, credential.token)
+    const session = await findSessionByToken(db, credential.token)
     if (!session) {
       if (credential.source === 'cookie') {
         reply.clearCookie(SESSION_COOKIE_NAME, {
@@ -67,6 +81,12 @@ export async function authPlugin(app, options = {}) {
     request.auth = {
       ...session,
       credentialSource: credential.source
+    }
+
+    if (session.user.mustResetPassword && !canUseTemporaryPassword(request)) {
+      return sendError(reply, 403, '请先修改临时密码', {
+        reason: 'PASSWORD_RESET_REQUIRED'
+      })
     }
   }
 

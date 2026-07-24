@@ -37,3 +37,8 @@ __pycache__/
 *.sw?
 
 *.tsbuildinfo
+
+.vercel/
+
+.vercel
+.env*

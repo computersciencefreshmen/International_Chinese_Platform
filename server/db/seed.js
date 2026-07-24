@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 
-import { createDatabase, DEFAULT_DATABASE_FILE } from './database.js'
+import { createDatabase } from './database.js'
 import {
   DEMO_ACCOUNTS,
   DEMO_IDS,
@@ -29,11 +29,13 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  const filename = process.argv[2] || DEFAULT_DATABASE_FILE
-  const database = createDatabase({ filename })
-  const result = seedDatabase(database)
-  database.close()
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('db:seed is disabled in production')
+  }
+  const database = await createDatabase()
+  const result = await seedDatabase(database)
+  await database.close()
   process.stdout.write(
-    `Demo data seeded: ${filename} (${result.users} users, ${result.courses} courses)\n`
+    `Demo data seeded (${result.users} users, ${result.courses} courses)\n`
   )
 }

@@ -7,7 +7,7 @@ import cookie from '@fastify/cookie'
 import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
 
-import { createDatabase } from '../db/database.js'
+import { createTestDatabase } from './support/database.js'
 import { createSession } from '../lib/session.js'
 import authPlugin from '../plugins/auth.js'
 import realtimeRoutes from '../routes/realtime.js'
@@ -20,8 +20,8 @@ function bearer(token) {
   return { authorization: `Bearer ${token}` }
 }
 
-function addUser(database, { id = randomUUID(), role, displayName }) {
-  database
+async function addUser(database, { id = randomUUID(), role, displayName }) {
+  await database
     .prepare(
       `INSERT INTO users (
         id, email, password_hash, role, display_name, status
@@ -29,7 +29,7 @@ function addUser(database, { id = randomUUID(), role, displayName }) {
     )
     .run(id, `${role}-${id}@example.com`, 'x'.repeat(64), role, displayName)
 
-  const session = createSession(database, id, { ttlSeconds: 3600 })
+  const session = await createSession(database, id, { ttlSeconds: 3600 })
   return {
     id,
     role,
@@ -39,7 +39,7 @@ function addUser(database, { id = randomUUID(), role, displayName }) {
   }
 }
 
-function addClassroom(database, studentId, teacherId, overrides = {}) {
+async function addClassroom(database, studentId, teacherId, overrides = {}) {
   const appointmentId = randomUUID()
   const classroomId = randomUUID()
   const now = Date.now()
@@ -50,7 +50,7 @@ function addClassroom(database, studentId, teacherId, overrides = {}) {
     scheduledStart.getTime() + (overrides.durationMinutes ?? 60) * 60_000
   )
 
-  database
+  await database
     .prepare(
       `INSERT INTO appointments (
         id, student_id, teacher_id, scheduled_start, scheduled_end,
@@ -66,7 +66,7 @@ function addClassroom(database, studentId, teacherId, overrides = {}) {
       '实时课堂测试'
     )
 
-  database
+  await database
     .prepare(
       `INSERT INTO classrooms (id, appointment_id, room_code, status)
        VALUES (?, ?, ?, 'scheduled')`
@@ -127,10 +127,13 @@ function expectNoEvent(socket, predicate, timeoutMs = 200) {
 }
 
 async function createTestApp(t) {
-  const database = createDatabase({ filename: ':memory:' })
+  const database = await createTestDatabase()
   const app = Fastify({ logger: false })
   const sockets = new Set()
   app.decorate('db', database)
+  app.decorate('config', {
+    publicWebsocketOrigin: 'wss://api.example.test'
+  })
 
   await app.register(cookie)
   await app.register(websocket)
@@ -145,7 +148,7 @@ async function createTestApp(t) {
   t.after(async () => {
     for (const socket of sockets) socket.terminate()
     await app.close()
-    database.close()
+    await database.close()
   })
 
   return {
@@ -170,19 +173,19 @@ async function issueTicket(app, classroomId, user) {
 
 test('only classroom participants can issue tickets or read history', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '课堂学生'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '课堂教师'
   })
-  const outsider = addUser(database, {
+  const outsider = await addUser(database, {
     role: 'student',
     displayName: '无关学生'
   })
-  const classroomId = addClassroom(database, student.id, teacher.id)
+  const classroomId = await addClassroom(database, student.id, teacher.id)
 
   const ticket = await issueTicket(app, classroomId, outsider)
   assert.equal(ticket.response.statusCode, 403)
@@ -205,15 +208,15 @@ test('only classroom participants can issue tickets or read history', async (t) 
 
 test('participants cannot issue a ticket before the 30 minute join window', async (t) => {
   const { app, database } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '远期课堂学生'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '远期课堂教师'
   })
-  const classroomId = addClassroom(database, student.id, teacher.id, {
+  const classroomId = await addClassroom(database, student.id, teacher.id, {
     startOffsetMinutes: 120
   })
 
@@ -228,15 +231,15 @@ test('participants cannot issue a ticket before the 30 minute join window', asyn
 
 test('a short-lived WebSocket ticket is consumed exactly once', async (t) => {
   const { app, database, connect } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '一次性票据学生'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '一次性票据教师'
   })
-  const classroomId = addClassroom(database, student.id, teacher.id)
+  const classroomId = await addClassroom(database, student.id, teacher.id)
   const issued = await issueTicket(app, classroomId, student)
 
   assert.equal(issued.response.statusCode, 201)
@@ -246,12 +249,13 @@ test('a short-lived WebSocket ticket is consumed exactly once', async (t) => {
   const path = `/ws/classroom?ticket=${encodeURIComponent(
     issued.body.data.ticket
   )}`
+  assert.equal(issued.body.data.websocketUrl, `wss://api.example.test${path}`)
   const socket = await connect(path)
   assert.equal(socket.readyState, 1)
 
   await assert.rejects(app.injectWS(path), /Unexpected server response: 401/)
 
-  database
+  await database
     .prepare('UPDATE sessions SET revoked_at = ? WHERE id = ?')
     .run(new Date().toISOString(), student.sessionId)
   const closed = once(socket, 'close')
@@ -262,15 +266,15 @@ test('a short-lived WebSocket ticket is consumed exactly once', async (t) => {
 
 test('two participants exchange a deduplicated message that remains in history', async (t) => {
   const { app, database, connect } = await createTestApp(t)
-  const student = addUser(database, {
+  const student = await addUser(database, {
     role: 'student',
     displayName: '消息学生'
   })
-  const teacher = addUser(database, {
+  const teacher = await addUser(database, {
     role: 'teacher',
     displayName: '消息教师'
   })
-  const classroomId = addClassroom(database, student.id, teacher.id)
+  const classroomId = await addClassroom(database, student.id, teacher.id)
   const teacherTicket = await issueTicket(app, classroomId, teacher)
   const studentTicket = await issueTicket(app, classroomId, student)
 
@@ -320,12 +324,14 @@ test('two participants exchange a deduplicated message that remains in history',
   assert.equal((await duplicate).message.id, messageEvent.message.id)
 
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM chat_messages
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM chat_messages
          WHERE classroom_id = ? AND client_message_id = ?`
-      )
-      .get(classroomId, clientMessageId).count,
+        )
+        .get(classroomId, clientMessageId)
+    ).count,
     1
   )
 
@@ -344,28 +350,28 @@ test('two participants exchange a deduplicated message that remains in history',
 
 test('chat broadcasts and RTC signalling never cross classroom boundaries', async (t) => {
   const { app, database, connect } = await createTestApp(t)
-  const firstStudent = addUser(database, {
+  const firstStudent = await addUser(database, {
     role: 'student',
     displayName: '第一课堂学生'
   })
-  const firstTeacher = addUser(database, {
+  const firstTeacher = await addUser(database, {
     role: 'teacher',
     displayName: '第一课堂教师'
   })
-  const secondStudent = addUser(database, {
+  const secondStudent = await addUser(database, {
     role: 'student',
     displayName: '第二课堂学生'
   })
-  const secondTeacher = addUser(database, {
+  const secondTeacher = await addUser(database, {
     role: 'teacher',
     displayName: '第二课堂教师'
   })
-  const firstClassroomId = addClassroom(
+  const firstClassroomId = await addClassroom(
     database,
     firstStudent.id,
     firstTeacher.id
   )
-  const secondClassroomId = addClassroom(
+  const secondClassroomId = await addClassroom(
     database,
     secondStudent.id,
     secondTeacher.id
@@ -409,20 +415,24 @@ test('chat broadcasts and RTC signalling never cross classroom boundaries', asyn
   await noChatLeak
 
   assert.equal(
-    database
-      .prepare(
-        'SELECT COUNT(*) AS count FROM chat_messages WHERE classroom_id = ?'
-      )
-      .get(secondClassroomId).count,
+    (
+      await database
+        .prepare(
+          'SELECT COUNT(*) AS count FROM chat_messages WHERE classroom_id = ?'
+        )
+        .get(secondClassroomId)
+    ).count,
     0
   )
   assert.equal(
-    database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM chat_messages
+    (
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM chat_messages
          WHERE classroom_id = ? AND client_message_id = ?`
-      )
-      .get(firstClassroomId, clientMessageId).count,
+        )
+        .get(firstClassroomId, clientMessageId)
+    ).count,
     1
   )
 })

@@ -18,15 +18,20 @@ async function shutdown(signal) {
   try {
     if (app) await app.close()
   } finally {
-    if (database?.open) database.close()
+    if (database?.open) await database.close()
   }
 }
 
 try {
-  database = createDatabase({
-    filename: config.databasePath,
-    seed: config.seedOnStart
+  database = await createDatabase({
+    connectionString: config.databaseUrl,
+    ssl: config.databaseSsl,
+    max: config.databasePoolMax
   })
+  if (config.seedOnStart) {
+    const { seedDatabase } = await import('./db/seed-data.js')
+    await seedDatabase(database)
+  }
   app = await buildApp({ database, config })
   await app.listen({ host: config.host, port: config.port })
 
@@ -46,6 +51,6 @@ try {
     console.error('API server failed to start')
   }
 
-  if (database?.open) database.close()
+  if (database?.open) await database.close()
   process.exitCode = 1
 }
