@@ -20,16 +20,17 @@
 
 ```mermaid
 flowchart LR
-  Browser["Vue 3 browser client"] -->|"HTTPS / page"| Vercel[Vercel]
-  Vercel -->|"/api/* rewrite"| API["Railway · Fastify"]
+  Browser["Vue 3 browser client"] -->|"HTTPS page + /api/v1/*"| Vercel["Vercel · SPA + mail relay"]
+  Vercel -->|"/api/v1/* rewrite"| API["Railway · Fastify"]
   Browser -->|"WSS"| API
   Browser -->|"10-minute presigned PUT"| R2["Cloudflare R2 · private"]
   API --> PG[(Railway PostgreSQL)]
   API --> R2
-  API --> Gmail["Gmail SMTP"]
+  API -->|"HMAC HTTPS /api/mail-relay"| Vercel
+  Vercel -->|"SMTP 465"| Gmail["Gmail SMTP"]
 ```
 
-Beta 阶段后端保持单实例，因为实时房间成员状态保存在进程内。前端通过 Vercel `/api/*` 代理使用第一方 Cookie；课堂 WebSocket 直接连接 Railway。
+Beta 阶段后端保持单实例，因为实时房间成员状态保存在进程内。Vercel 只把 `/api/v1/*` 代理至 Railway，以维持第一方 Cookie；`/api/mail-relay` 留在 Vercel 执行 Gmail SMTP，课堂 WebSocket 则直接连接 Railway。
 
 ## 本地启动
 
@@ -82,7 +83,8 @@ pnpm backup:restore      # 受 CONFIRM_RESTORE 保护的恢复
 - 后端：Railway Docker 单实例
 - 数据库：Railway PostgreSQL
 - 文件：Cloudflare R2 私有 Bucket
-- 邮件：Gmail SMTP 应用密码
+- 邮件：Railway 通过 HMAC HTTPS 调用 Vercel `/api/mail-relay`；Gmail 应用密码只保存在 Vercel
+- 备份：独立 Railway Cron 每日 `18:00 UTC` 运行；公开 Beta 暂时复用私有 staging Bucket
 
 完整 Secret、R2 CORS/生命周期、管理员初始化、备份、恢复和回滚步骤见[运维手册](./docs/operations.md)。架构决策见 [`docs/adr`](./docs/adr)。
 
