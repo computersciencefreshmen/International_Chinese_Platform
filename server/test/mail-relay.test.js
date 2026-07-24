@@ -63,6 +63,9 @@ test('mail relay accepts a valid signed verification payload', async () => {
   assert.equal(message.to, 'student@example.test')
   assert.equal(message.subject, '国际中文学习平台注册验证码')
   assert.match(message.text, /123456/)
+  assert.match(message.html, /INTERNATIONAL CHINESE EDUCATION/)
+  assert.match(message.html, /role="presentation"/)
+  assert.doesNotMatch(message.html, /<img\b/i)
 })
 
 test('mail relay rejects expired and invalid signatures before SMTP', async () => {
