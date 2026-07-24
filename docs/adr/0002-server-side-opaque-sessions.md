@@ -1,7 +1,8 @@
 # ADR-0002：使用服务端 opaque session
 
-**状态：** Accepted  
-**日期：** 2026-07-19
+**状态：** Partially superseded by ADR-0003 · **日期：** 2026-07-19
+
+> **历史说明：** 不透明服务端 Session 的安全模型仍然有效；当前实现把 Session 摘要保存在 PostgreSQL，而不是本文记录的 SQLite。数据存储事实以 ADR-0003 为准。
 
 ## Context
 

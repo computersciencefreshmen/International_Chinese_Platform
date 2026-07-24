@@ -5,7 +5,7 @@
 
 ## Decision
 
-Serve the Vue SPA from Vercel and the single-instance Fastify API from Railway. Vercel externally rewrites `/api/:path*` to Railway, while classroom WebSockets connect directly to the Railway WSS origin returned in the one-time ticket response.
+Serve the Vue SPA from Vercel and the single-instance Fastify API from Railway. Vercel externally rewrites `/api/v1/:path*` to Railway, while classroom WebSockets connect directly to the Railway WSS origin returned in the one-time ticket response.
 
 ## Consequences
 

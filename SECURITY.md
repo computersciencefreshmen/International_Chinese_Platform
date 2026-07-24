@@ -22,7 +22,7 @@ Please allow time for a fix and coordinated disclosure. After remediation, the p
 - Never enable demo seeding in production and never bake administrator credentials into an image or Compose file.
 - Store `VERIFICATION_CODE_SECRET`, SMTP, AI, and TURN credentials outside version control; grant access only to deployment operators and rotate them after suspected exposure.
 - Keep secure, HttpOnly session cookies enabled, disable bearer authentication unless an audited non-browser client requires it, and configure the trusted proxy boundary deliberately.
-- Back up both the SQLite database and uploaded files, encrypt backups, test restores, and restrict backup access.
+- Back up PostgreSQL data, encrypt backup dumps, test restores, and restrict access to both the private object bucket and the backup bucket.
 - Rebuild frequently from the lockfile and review dependency/security alerts before deploying.
 
 Deployment hardening, backup, restore, migration, and secret-handling procedures are documented in [docs/operations.md](docs/operations.md).
